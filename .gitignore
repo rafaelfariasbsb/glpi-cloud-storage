@@ -1,4 +1,7 @@
-vendor/
+# PHP dependencies
+**/vendor/
+
+# Terraform
 .terraform/
 .terraform.lock.hcl
 *.tfstate

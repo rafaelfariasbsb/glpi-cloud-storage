@@ -12,7 +12,7 @@ A: Yes! All instances can point to the same Azure container, as long as they sha
 A: No, only with self-hosted installations where you have access to the plugins directory.
 
 **Q: Can I use AWS S3 instead of Azure?**
-A: Not directly, but the architecture uses Flysystem, making it easy to create a variation with the S3 adapter. Contributions are welcome.
+A: An AWS S3 plugin (`awss3storage`) is planned for this repository. The architecture uses Flysystem, which makes adding new cloud adapters straightforward. Contributions are welcome.
 
 ## Costs
 

@@ -33,6 +33,42 @@ All plugins share the same approach:
 
 Each plugin is a standalone GLPI plugin that can be installed independently.
 
+## Infrastructure
+
+A Terraform configuration is included in [`terraform/`](terraform/) to deploy the full stack on Azure:
+
+- Azure Container Apps (GLPI + MariaDB)
+- Azure Blob Storage (for documents)
+- Log Analytics Workspace
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your values
+terraform init && terraform plan && terraform apply
+```
+
+## Project Structure
+
+```
+glpi-cloud-storage/
+├── README.md                          # This file
+├── azureblobstorage/                  # Azure Blob Storage plugin
+│   ├── setup.php                      # Plugin registration and hooks
+│   ├── hook.php                       # Install/uninstall (DB table)
+│   ├── composer.json                  # PHP dependencies
+│   ├── src/                           # Plugin source code
+│   ├── front/                         # Front controllers
+│   ├── templates/                     # Twig templates
+│   ├── js/                            # JavaScript (URL rewriter)
+│   └── docs/                          # Plugin documentation
+├── terraform/                         # Azure infrastructure as code
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+└── awss3storage/                      # (planned) AWS S3 plugin
+```
+
 ## Requirements
 
 | Requirement | Minimum |

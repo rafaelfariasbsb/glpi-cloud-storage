@@ -79,18 +79,7 @@ php bin/console plugins:azureblobstorage:migrate-local
 
 ## Infrastructure
 
-A Terraform configuration is included in [`terraform/`](terraform/) to deploy the full stack on Azure:
-
-- Azure Container Apps (GLPI + MariaDB)
-- Azure Blob Storage (for documents)
-- Log Analytics Workspace
-
-```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your values
-terraform init && terraform plan && terraform apply
-```
+A Terraform configuration for deploying the full Azure stack (Container Apps, Blob Storage, MariaDB) is available in the [repository root `terraform/` directory](../terraform/).
 
 ## Documentation
 
@@ -101,9 +90,10 @@ terraform init && terraform plan && terraform apply
 - [Security](docs/security.md)
 - [FAQ](docs/faq.md)
 
-## Project Structure
+## Plugin Structure
 
 ```
+azureblobstorage/
 ├── setup.php                  # Plugin registration and hooks
 ├── hook.php                   # Install/uninstall (DB table creation)
 ├── composer.json              # PHP dependencies
@@ -123,10 +113,6 @@ terraform init && terraform plan && terraform apply
 │   └── config.html.twig       # Configuration UI template
 ├── js/
 │   └── url-rewriter.js        # Frontend URL rewriting
-├── terraform/                 # Azure infrastructure as code
-│   ├── main.tf
-│   ├── variables.tf
-│   └── outputs.tf
 └── docs/                      # Full documentation
 ```
 
