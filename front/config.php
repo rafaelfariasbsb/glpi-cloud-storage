@@ -13,6 +13,13 @@ include('../../../inc/includes.php');
 
 Session::checkRight('config', UPDATE);
 
+Html::header(
+    __('Azure Blob Storage'),
+    $_SERVER['PHP_SELF'],
+    'config',
+    'plugins'
+);
+
 $config = Config::getPluginConfig();
 
 $plugin = new Plugin();
@@ -26,3 +33,5 @@ TemplateRenderer::getInstance()->display(
         'canedit'   => Session::haveRight('config', UPDATE),
     ]
 );
+
+Html::footer();
