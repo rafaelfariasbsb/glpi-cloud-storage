@@ -15,7 +15,7 @@ A: No, only with self-hosted installations where you have access to the plugins 
 A: S3 support is planned for Phase 2 of the plugin. The architecture already includes `StorageClientInterface` and `StorageClientFactory` to support multiple providers.
 
 **Q: Does the plugin delete local files automatically?**
-A: No. Even in Cloud Primary mode, local files are kept during the HTTP request to avoid race conditions with inline image loading. Use the `cleanup-local` CLI command to remove local copies of confirmed cloud-stored files.
+A: No. Even in Cloud Primary mode, local files are kept during the HTTP request to avoid race conditions with inline image loading. Use `plugins:cloudstorage:migrate --delete-local` to remove local copies after confirming they are in cloud storage.
 
 ## Costs
 
@@ -23,7 +23,7 @@ A: No. Even in Cloud Primary mode, local files are kept during the HTTP request 
 A: Azure charges per GB stored and per operation. For most GLPI installations, the cost is cents per month. Check the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/).
 
 **Q: Which Azure Blob tier should I use?**
-A: **Hot** for frequently accessed documents, **Cool** for rarely accessed. Configure tier policies in the Azure Portal, not in the plugin. See [Security - Lifecycle Management](security.md).
+A: **Hot** for frequently accessed documents, **Cool** for rarely accessed. Configure tier policies in the Azure Portal, not in the plugin. See [Security - Lifecycle Management](05-security.md).
 
 ## Troubleshooting
 

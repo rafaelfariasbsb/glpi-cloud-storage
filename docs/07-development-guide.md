@@ -2,70 +2,48 @@
 
 ## Local Development Environment
 
-The project includes a Docker Compose setup with GLPI, MariaDB, and Azurite (official Microsoft Azure Storage emulator).
-
 ### Prerequisites
 
 | Requirement | Version |
 |-------------|---------|
-| Docker | Latest |
-| Docker Compose | v2+ |
+| GLPI (installed) | 11.0+ |
 | Composer | 2.x |
-| PHP (optional, for IDE) | >= 8.2 |
+| PHP | >= 8.2 |
 
 ### Setup
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git
-cd glpi-cloud-storage
+# 1. Clone the plugin into your GLPI plugins directory
+cd /path/to/glpi/plugins
+git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git cloudstorage
 
 # 2. Install PHP dependencies
+cd cloudstorage
 composer install
 
-# 3. Start the environment
-docker compose up -d
-
-# 4. Wait for services (~30s). Azurite init container auto-creates the blob container.
-
-# 5. Install composer inside container
-docker exec --user root glpi-app bash -c "cd /tmp && php -r \"copy('https://getcomposer.org/installer', 'composer-setup.php');\" && php composer-setup.php --install-dir=/usr/local/bin --filename=composer && rm composer-setup.php"
-docker exec --user root glpi-app composer install -d /var/www/glpi/plugins/cloudstorage
-
-# 6. Install and activate the plugin
-docker exec glpi-app php /var/www/glpi/bin/console plugin:install cloudstorage --username=glpi
-docker exec glpi-app php /var/www/glpi/bin/console plugin:activate cloudstorage
+# 3. Install and activate the plugin via CLI
+cd /path/to/glpi
+php bin/console plugin:install cloudstorage --username=glpi
+php bin/console plugin:activate cloudstorage
 ```
 
-Access GLPI at **http://localhost:8080** (admin: `glpi` / `glpi`).
+### Azurite (Azure Emulator)
 
-### Services
+For local development without a real Azure account, use [Azurite](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite):
 
-| Service | Port | Description |
-|---------|------|-------------|
-| **glpi** | `localhost:8080` | GLPI with plugin mounted at `/var/www/glpi/plugins/cloudstorage` |
-| **db** | 3306 (internal) | MariaDB 11.8 (`glpi/glpi/glpi`) |
-| **azurite** | `localhost:10000` | Azure Blob Storage emulator |
-| **azurite-init** | — | One-shot: creates `glpi-documents` container on startup |
+```bash
+# Run Azurite via Docker
+docker run -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite-blob --blobHost 0.0.0.0
+```
 
-### Docker Volumes
-
-| Volume | Mount | Purpose |
-|--------|-------|---------|
-| `glpi_files` | `/var/www/glpi/files` | Persist GLPI documents across container restarts |
-| `db_data` | `/var/lib/mysql` | Persist MariaDB data |
-| `azurite_data` | `/data` | Persist Azurite blobs |
-
-### Azurite Credentials (Dev Only)
-
-These are [well-known Azurite default credentials](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key):
+Well-known Azurite credentials:
 
 | Field | Value |
 |-------|-------|
 | Account Name | `devstoreaccount1` |
 | Account Key | `Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==` |
 | Container | `glpi-documents` |
-| Connection String | `DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;` |
+| Connection String | `DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;` |
 
 ---
 
@@ -163,7 +141,7 @@ $this->filesystem->write($blobPath, $contents);
 
 ---
 
-## Testing
+## Testing (Planned — Phase 3)
 
 ### Framework
 
@@ -175,15 +153,8 @@ $this->filesystem->write($blobPath, $contents);
 ### Running Tests
 
 ```bash
-# Inside GLPI container
-docker exec glpi-app bash
-
-# Run plugin tests (from GLPI root)
+# From GLPI root
 vendor/bin/phpunit plugins/cloudstorage/tests/
-
-# Or via Makefile
-make phpunit
-make paratest p=8
 ```
 
 ---

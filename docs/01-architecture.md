@@ -153,6 +153,7 @@ CREATE TABLE `glpi_plugin_cloudstorage_documenttrackers` (
 
 | Hook | Target | Purpose |
 |------|--------|---------|
+| `Hooks::CSRF_COMPLIANT` | - | CSRF compliance declaration (marketplace requirement) |
 | `Hooks::ITEM_ADD` | Document | Upload file to cloud after creation |
 | `Hooks::ITEM_UPDATE` | Document | Upload new version if file changed |
 | `Hooks::PRE_ITEM_PURGE` | Document | Delete blob before DB purge |
@@ -191,16 +192,11 @@ AzureBlobClient (implements StorageClientInterface)
 
 ## Error Handling
 
-The plugin follows **graceful degradation** — cloud failures never block GLPI core operations.
-
-| Scenario | Behavior |
-|----------|----------|
-| Cloud unavailable during upload | File stays local, warning shown, error logged |
-| Cloud unavailable during download | Falls back to local file or shows friendly error |
-| Cloud unavailable during delete | Purge proceeds normally, orphan blob logged |
-| Invalid credentials | "Test Connection" alerts with sanitized error |
+The plugin follows **graceful degradation** — cloud failures never block GLPI core operations. See [FAQ — Error Handling](06-faq.md#error-handling) for scenario details.
 
 ### Logging (Two-Tier)
+
+Every catch block logs at both levels:
 
 | Target | Method | Content |
 |--------|--------|---------|
@@ -215,11 +211,13 @@ The plugin follows **graceful degradation** — cloud failures never block GLPI 
 - `sig=***REDACTED***`
 - Long base64 sequences
 
-## Testing Strategy
+## Testing Strategy (Planned — Phase 3)
 
 - PHPUnit 11.5 + Paratest
 - Base class: `DbTestCase` (transaction rollback)
 - vfsStream for filesystem mocking
+
+Planned test classes:
 
 | Class | Coverage |
 |-------|----------|

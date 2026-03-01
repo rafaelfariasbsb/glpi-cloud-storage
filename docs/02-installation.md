@@ -109,7 +109,7 @@ php /path/to/glpi/bin/console plugin:install cloudstorage --username=glpi
 php /path/to/glpi/bin/console plugin:activate cloudstorage
 ```
 
-5. Go to **Setup > Plugins > Cloud Storage** and configure your credentials (see [Configuration Guide](configuration.md)).
+5. Go to **Setup > Plugins > Cloud Storage** and configure your credentials (see [Configuration Guide](03-configuration.md)).
 6. Enable the plugin using the toggle on the configuration page.
 
 ### Via Web Interface
@@ -123,12 +123,7 @@ php /path/to/glpi/bin/console plugin:activate cloudstorage
 
 ## Upgrading from v1.x (azureblobstorage)
 
-The plugin was renamed from `azureblobstorage` to `cloudstorage` in v2.0.0. The install hook automatically migrates:
-
-- Table renamed: `glpi_plugin_azureblobstorage_documenttrackers` → `glpi_plugin_cloudstorage_documenttrackers`
-- Column renamed: `azure_blob_name` → `remote_path`
-- Config keys migrated: `connection_string` → `azure_connection_string`, etc.
-- Enum values updated: `azure_primary` → `cloud_primary`, `sas_redirect` → `redirect`
+See [Migration — Upgrading from v1.x](04-migration.md#upgrading-from-v1x-azureblobstorage) for details. The install hook handles all migration automatically.
 
 ## Uninstallation
 

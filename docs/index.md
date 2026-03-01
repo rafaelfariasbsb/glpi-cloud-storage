@@ -13,33 +13,17 @@
 
 ### For Users
 
-- [Installation](installation.md) — CLI install, web interface, uninstall
-- [Configuration](configuration.md) — Cloud credentials, storage modes, download methods
-- [Migration](migration.md) — CLI migration commands and recommended strategy
-- [Security](security.md) — Credential encryption, SAS URLs, access control
-- [FAQ](faq.md) — Common questions, troubleshooting, error handling
+- [02 — Installation](02-installation.md) — CLI install, web interface, uninstall
+- [03 — Configuration](03-configuration.md) — Cloud credentials, storage modes, download methods
+- [04 — Migration](04-migration.md) — CLI migration commands and recommended strategy
+- [05 — Security](05-security.md) — Credential encryption, SAS URLs, access control
+- [06 — FAQ](06-faq.md) — Common questions, costs, error handling
 
 ### For Developers
 
-- [Architecture](architecture.md) — System design, hook flows, DB schema, dependencies
-- [Development Guide](development-guide.md) — Setup, project conventions, testing, source tree
-
-### References
-
-- [Migration from azure-oss](migration-azure-oss.md) — Dependency migration notes
-- [Security Audit (2026-03-01)](security-audit-2026-03-01.md) — Security audit report
+- [01 — Architecture](01-architecture.md) — System design, hook flows, DB schema, dependencies
+- [07 — Development Guide](07-development-guide.md) — Setup, project conventions, testing, source tree
 
 ## Quick Start
 
-```bash
-# Clone and install
-git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git /path/to/glpi/plugins/cloudstorage
-cd /path/to/glpi/plugins/cloudstorage
-composer install --no-dev
-
-# Enable
-php /path/to/glpi/bin/console plugin:install cloudstorage --username=glpi
-php /path/to/glpi/bin/console plugin:activate cloudstorage
-```
-
-Then go to **Setup > Plugins > Cloud Storage** to configure your cloud credentials and enable the plugin.
+See [Installation Guide](02-installation.md) for detailed instructions, or the [README](../README.md) for a quick overview.

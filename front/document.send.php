@@ -66,7 +66,7 @@ if ($tracking === null) {
         $localPath = GLPI_DOC_DIR . '/' . $doc->fields['filepath'];
         if (file_exists($localPath)) {
             $doc->getAsResponse()->send();
-            exit;
+            return;
         }
     }
 
@@ -88,7 +88,7 @@ try {
         $response = new RedirectResponse($sasUrl, 302);
         $response->headers->set('Referrer-Policy', 'no-referrer');
         $response->send();
-        exit;
+        return;
     }
 
     // Proxy mode: stream content through GLPI (memory-safe for large files)
@@ -133,7 +133,7 @@ try {
     ]);
 
     $response->send();
-    exit;
+    return;
 } catch (\Throwable $e) {
     trigger_error(
         sprintf('[CloudStorage] Download failed for document %d: %s', $docId, $e->getMessage()),
@@ -152,7 +152,7 @@ try {
     $localPath = GLPI_DOC_DIR . '/' . $doc->fields['filepath'];
     if (file_exists($localPath)) {
         $doc->getAsResponse()->send();
-        exit;
+        return;
     }
 
     $exception = new NotFoundHttpException();

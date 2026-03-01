@@ -25,14 +25,13 @@ This plugin redirects storage to cloud: unlimited capacity, high availability, g
 - CLI migration commands for existing documents
 - Graceful fallback — cloud failures never block GLPI operations
 - Path traversal protection and credential sanitization
-- Configuration UI integrated into GLPI's plugin settings
 
 ## Supported Providers
 
-| Provider | Status | Package |
-|----------|--------|---------|
-| **Azure Blob Storage** | Available | `azure-oss/storage-blob-flysystem` |
-| **AWS S3** | Planned (Phase 2) | `league/flysystem-aws-s3-v3` |
+| Provider | Status |
+|----------|--------|
+| **Azure Blob Storage** | Available |
+| **AWS S3** | Planned (Phase 2) |
 
 ## Requirements
 
@@ -57,68 +56,19 @@ php /path/to/glpi/bin/console plugin:install cloudstorage --username=glpi
 php /path/to/glpi/bin/console plugin:activate cloudstorage
 ```
 
-4. Go to **Setup > Plugins > Cloud Storage**, configure credentials, and enable the plugin.
-
-## Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Provider** | Azure | `azure` (Azure Blob Storage) |
-| **Storage Mode** | Cloud Primary | `cloud_primary` (upload to cloud, clean local via CLI) or `cloud_backup` (keep both) |
-| **Download Method** | Redirect | `redirect` (302 to temporary URL) or `proxy` (stream through GLPI) |
-| **URL Expiry** | 5 min | Validity period for temporary download URLs |
-
-## Migration
-
-```bash
-# Migrate existing documents to cloud
-php bin/console plugins:cloudstorage:migrate --batch-size=100
-
-# Dry run (simulate)
-php bin/console plugins:cloudstorage:migrate --dry-run
-
-# Reverse: download from cloud back to local
-php bin/console plugins:cloudstorage:migrate-local
-```
+Then go to **Setup > Plugins > Cloud Storage**, configure your cloud credentials, and enable the plugin.
 
 ## Documentation
 
-- [Documentation Index](docs/index.md)
-- [Installation](docs/installation.md)
-- [Configuration](docs/configuration.md)
-- [Architecture](docs/architecture.md)
-- [Security](docs/security.md)
-- [Migration](docs/migration.md)
-- [Development Guide](docs/development-guide.md)
-- [FAQ](docs/faq.md)
+Full documentation is available in the [docs/](docs/index.md) directory:
 
-## Project Structure
-
-```
-cloudstorage/
-├── setup.php                       # Plugin registration and hooks
-├── hook.php                        # Install/uninstall (DB + migration)
-├── composer.json                   # PHP dependencies
-├── front/
-│   ├── config.php                  # Configuration page
-│   ├── config.form.php             # Configuration form handler
-│   └── document.send.php           # Download proxy/redirect endpoint
-├── src/
-│   ├── StorageClientInterface.php  # Cloud storage contract (9 methods)
-│   ├── StorageClientFactory.php    # Singleton factory for providers
-│   ├── AzureBlobClient.php         # Azure implementation (Flysystem + SAS)
-│   ├── Config.php                  # Plugin configuration management
-│   ├── DocumentTracker.php         # Document tracking table (CommonDBTM)
-│   ├── DocumentHook.php            # GLPI hook handlers (add/update/purge)
-│   └── Console/
-│       ├── MigrateCommand.php      # CLI: migrate to cloud
-│       └── MigrateLocalCommand.php # CLI: migrate back to local
-├── public/js/
-│   └── url-rewriter.js             # Frontend URL rewriting
-├── templates/
-│   └── config.html.twig            # Configuration UI template
-└── docs/                           # Full documentation
-```
+- [Installation](docs/02-installation.md) — Prerequisites, Azure setup, CLI/web install
+- [Configuration](docs/03-configuration.md) — Credentials, storage modes, download methods
+- [Migration](docs/04-migration.md) — Migrate existing documents to/from cloud
+- [Security](docs/05-security.md) — Encryption, SAS URLs, access control
+- [FAQ](docs/06-faq.md) — Common questions and troubleshooting
+- [Architecture](docs/01-architecture.md) — System design, hooks, DB schema
+- [Development Guide](docs/07-development-guide.md) — Setup, conventions, testing
 
 ## License
 

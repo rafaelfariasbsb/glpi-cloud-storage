@@ -16,6 +16,10 @@
         "league/flysystem-aws-s3-v3": "^3.0",
         "aws/aws-sdk-php": "^3.295"
     },
+    "require-dev": {
+        "glpi-project/coding-standard": "^1.0",
+        "phpstan/phpstan": "^2.0"
+    },
     "autoload": {
         "psr-4": {
             "GlpiPlugin\\Cloudstorage\\": "src/"

@@ -17,14 +17,25 @@ function plugin_cloudstorage_install(): bool
         $DB->tableExists('glpi_plugin_azureblobstorage_documenttrackers')
         && !$DB->tableExists('glpi_plugin_cloudstorage_documenttrackers')
     ) {
-        $DB->doQuery(
+        if (!$DB->doQuery(
             "RENAME TABLE `glpi_plugin_azureblobstorage_documenttrackers`
              TO `glpi_plugin_cloudstorage_documenttrackers`"
-        );
-        $DB->doQuery(
+        )) {
+            trigger_error(
+                sprintf('[CloudStorage] Migration rename failed: %s', $DB->error()),
+                E_USER_WARNING
+            );
+            return false;
+        }
+        if (!$DB->doQuery(
             "ALTER TABLE `glpi_plugin_cloudstorage_documenttrackers`
              CHANGE `azure_blob_name` `remote_path` varchar(512) NOT NULL DEFAULT ''"
-        );
+        )) {
+            trigger_error(
+                sprintf('[CloudStorage] Migration alter failed: %s', $DB->error()),
+                E_USER_WARNING
+            );
+        }
     }
 
     // Migrate config: old context → new context with renamed keys
@@ -152,7 +163,7 @@ function plugin_cloudstorage_uninstall(): bool
             return false;
         }
 
-        $DB->doQuery("DROP TABLE `glpi_plugin_cloudstorage_documenttrackers`");
+        $DB->doQuery("DROP TABLE IF EXISTS `glpi_plugin_cloudstorage_documenttrackers`");
     }
 
     // Remove config values

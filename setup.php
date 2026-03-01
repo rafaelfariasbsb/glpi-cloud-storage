@@ -14,7 +14,7 @@ use GlpiPlugin\Cloudstorage\DocumentHook;
 
 define('PLUGIN_CLOUDSTORAGE_VERSION', '2.0.0');
 define('PLUGIN_CLOUDSTORAGE_MIN_GLPI_VERSION', '11.0.0');
-define('PLUGIN_CLOUDSTORAGE_MAX_GLPI_VERSION', '11.99.99');
+define('PLUGIN_CLOUDSTORAGE_MAX_GLPI_VERSION', '11.0.99');
 
 function plugin_version_cloudstorage(): array
 {
@@ -40,14 +40,18 @@ function plugin_cloudstorage_check_prerequisites(): bool
 {
     $autoload = __DIR__ . '/vendor/autoload.php';
     if (!file_exists($autoload)) {
-        echo "Cloud Storage plugin requires composer dependencies. Run 'composer install' in the plugin directory.";
+        Session::addMessageAfterRedirect(
+            __('Cloud Storage plugin requires composer dependencies. Run "composer install" in the plugin directory.'),
+            false,
+            ERROR
+        );
         return false;
     }
 
     return true;
 }
 
-function plugin_cloudstorage_check_config(): bool
+function plugin_cloudstorage_check_config($verbose = false): bool
 {
     return true;
 }
@@ -55,6 +59,9 @@ function plugin_cloudstorage_check_config(): bool
 function plugin_init_cloudstorage(): void
 {
     global $PLUGIN_HOOKS;
+
+    // CSRF compliance declaration (mandatory for GLPI marketplace)
+    $PLUGIN_HOOKS[Hooks::CSRF_COMPLIANT]['cloudstorage'] = true;
 
     $plugin = new Plugin();
     if (!$plugin->isActivated('cloudstorage')) {

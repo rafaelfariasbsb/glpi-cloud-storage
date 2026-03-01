@@ -40,6 +40,7 @@ php bin/console plugins:cloudstorage:migrate-local
 
 Options:
 - `--batch-size=100` — Documents per batch
+- `--delete-azure` — Delete blobs from cloud storage after successful download
 - `--dry-run` — Simulate without changes
 
 ## Recommended Migration Strategy

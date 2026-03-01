@@ -22,19 +22,16 @@ After installation, go to **Setup > Plugins > Cloud Storage**.
 
 ### How to Get Azure Credentials
 
-1. Go to the [Azure Portal](https://portal.azure.com)
-2. Navigate to **Storage Accounts** > select (or create) your account
-3. Under **Security + networking > Access keys**, copy the **Connection string** and **Key**
-4. Under **Data storage > Containers**, create a container (e.g., `glpi-documents`)
+See [Installation — Azure Storage Account](02-installation.md#azure-storage-account) for step-by-step instructions on creating and configuring your Azure Storage Account.
 
 ## Storage Mode
 
 | Mode | Behavior | Recommended Use |
 |------|----------|-----------------|
-| **Cloud Primary** (default) | File is uploaded to cloud; local copy can be cleaned up via CLI | Production - saves disk space |
+| **Cloud Primary** (default) | File is uploaded to cloud; local copies can be removed via `plugins:cloudstorage:migrate --delete-local` | Production - saves disk space |
 | **Cloud Backup** | File is kept both locally and in cloud | Transition - full redundancy |
 
-> **Note**: In Cloud Primary mode, local files are NOT deleted automatically during the HTTP request. Use the `cleanup-local` CLI command to remove local copies of confirmed cloud-stored files.
+> **Note**: In Cloud Primary mode, local files are NOT deleted automatically during the HTTP request. Use `plugins:cloudstorage:migrate --delete-local` to remove local copies of confirmed cloud-stored files.
 
 ## Download Method
 

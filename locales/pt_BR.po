@@ -1,0 +1,127 @@
+# Cloud Storage plugin for GLPI - Brazilian Portuguese translations
+# Copyright (C) 2026 Rafael Farias
+# This file is distributed under the same license as the Cloud Storage plugin.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: cloudstorage 2.0.0\n"
+"Report-Msgid-Bugs-To: https://github.com/rafaelfariasbsb/glpi-cloud-storage/issues\n"
+"POT-Creation-Date: 2026-03-01 00:00+0000\n"
+"PO-Revision-Date: 2026-03-01 00:00+0000\n"
+"Last-Translator: Rafael Farias\n"
+"Language-Team: Brazilian Portuguese\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Cloud Storage"
+msgstr "Armazenamento Cloud"
+
+msgid "Enabled"
+msgstr "Habilitado"
+
+msgid "Storage Provider"
+msgstr "Provedor de Armazenamento"
+
+msgid "Azure Blob Storage"
+msgstr "Azure Blob Storage"
+
+msgid "Cloud storage provider to use for document storage"
+msgstr "Provedor de armazenamento cloud para documentos"
+
+msgid "Azure Connection"
+msgstr "Conexao Azure"
+
+msgid "Account Name"
+msgstr "Nome da Conta"
+
+msgid "Azure Storage Account name (e.g. myaccount)"
+msgstr "Nome da Storage Account Azure (ex: minhaconta)"
+
+msgid "Connection String"
+msgstr "String de Conexao"
+
+msgid "Full Azure Storage connection string"
+msgstr "String de conexao completa do Azure Storage"
+
+msgid "Account Key"
+msgstr "Chave da Conta"
+
+msgid "Azure Storage Account access key"
+msgstr "Chave de acesso da Storage Account Azure"
+
+msgid "Container Name"
+msgstr "Nome do Container"
+
+msgid "Blob container name where documents will be stored"
+msgstr "Nome do container blob onde os documentos serao armazenados"
+
+msgid "Storage Behavior"
+msgstr "Comportamento do Armazenamento"
+
+msgid "Storage Mode"
+msgstr "Modo de Armazenamento"
+
+msgid "Cloud Primary - Delete local copy after upload"
+msgstr "Cloud Primario - Remover copia local apos upload"
+
+msgid "Cloud Backup - Keep both local and cloud copies"
+msgstr "Cloud Backup - Manter copias local e cloud"
+
+msgid "Controls whether local files are kept after upload to cloud storage"
+msgstr "Controla se arquivos locais sao mantidos apos upload para cloud"
+
+msgid "Download Method"
+msgstr "Metodo de Download"
+
+msgid "Redirect - Redirect browser to temporary cloud URL"
+msgstr "Redirect - Redirecionar navegador para URL temporaria cloud"
+
+msgid "Proxy - Stream through GLPI server"
+msgstr "Proxy - Transmitir pelo servidor GLPI"
+
+msgid "How documents are served to users when downloading"
+msgstr "Como os documentos sao entregues aos usuarios no download"
+
+msgid "URL Expiry (minutes)"
+msgstr "Expiracao da URL (minutos)"
+
+msgid "How long temporary URLs remain valid (only for Redirect mode)"
+msgstr "Tempo de validade das URLs temporarias (apenas para modo Redirect)"
+
+msgid "Test Connection"
+msgstr "Testar Conexao"
+
+msgid "Connection to cloud storage successful!"
+msgstr "Conexao com armazenamento cloud bem-sucedida!"
+
+msgid "Connection test failed: %s"
+msgstr "Teste de conexao falhou: %s"
+
+msgid "Configuration updated successfully."
+msgstr "Configuracao atualizada com sucesso."
+
+msgid "Invalid value for field \"%s\". Please check the format."
+msgstr "Valor invalido para o campo \"%s\". Verifique o formato."
+
+msgid "Unknown file"
+msgstr "Arquivo desconhecido"
+
+msgid "Missing document ID"
+msgstr "ID do documento ausente"
+
+msgid "Unauthorized access to this file"
+msgstr "Acesso nao autorizado a este arquivo"
+
+msgid "File %s not found."
+msgstr "Arquivo %s nao encontrado."
+
+msgid "File temporarily unavailable. Please try again later."
+msgstr "Arquivo temporariamente indisponivel. Tente novamente mais tarde."
+
+msgid "[Cloud Storage] Upload to cloud storage failed for document \"%s\". The local copy was kept. Check files/_log/cloudstorage.log for details."
+msgstr "[Cloud Storage] Upload para cloud falhou para o documento \"%s\". A copia local foi mantida. Verifique files/_log/cloudstorage.log para detalhes."
+
+msgid "Cloud Storage plugin requires composer dependencies. Run \"composer install\" in the plugin directory."
+msgstr "O plugin Cloud Storage requer dependencias composer. Execute \"composer install\" no diretorio do plugin."

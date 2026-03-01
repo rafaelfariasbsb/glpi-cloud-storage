@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+    <name>Cloud Storage</name>
+    <key>cloudstorage</key>
+    <state>stable</state>
+    <logo>https://raw.githubusercontent.com/rafaelfariasbsb/glpi-cloud-storage/main/cloudstorage.png</logo>
+
+    <description>
+        <short>
+            <en>Store GLPI documents in cloud storage providers (Azure Blob, AWS S3)</en>
+            <pt_BR>Armazene documentos GLPI em provedores de armazenamento cloud (Azure Blob, AWS S3)</pt_BR>
+        </short>
+        <long>
+            <en><![CDATA[Cloud Storage plugin for GLPI allows storing documents in cloud providers instead of the local filesystem.
+
+Features:
+- Azure Blob Storage support (AWS S3 planned)
+- Two storage modes: Cloud Primary (cloud only) and Cloud Backup (local + cloud)
+- Two download methods: Redirect (SAS URL) and Proxy (stream through GLPI)
+- SHA1-based deduplication to avoid duplicate uploads
+- CLI commands for batch migration (to cloud and back to local)
+- Automatic migration from the legacy Azure Blob Storage plugin
+- Encrypted credential storage via GLPI's SECURED_CONFIGS
+- Comprehensive security: path traversal prevention, credential sanitization, HTTPS-only SAS URLs]]></en>
+            <pt_BR><![CDATA[Plugin Cloud Storage para GLPI permite armazenar documentos em provedores cloud ao inves do sistema de arquivos local.
+
+Funcionalidades:
+- Suporte a Azure Blob Storage (AWS S3 planejado)
+- Dois modos: Cloud Primary (somente cloud) e Cloud Backup (local + cloud)
+- Dois metodos de download: Redirect (URL SAS) e Proxy (stream via GLPI)
+- Deduplicacao baseada em SHA1 para evitar uploads duplicados
+- Comandos CLI para migracao em lote (para cloud e de volta ao local)
+- Migracao automatica do plugin legado Azure Blob Storage
+- Credenciais criptografadas via SECURED_CONFIGS do GLPI
+- Seguranca abrangente: prevencao de path traversal, sanitizacao de credenciais, SAS URLs HTTPS-only]]></pt_BR>
+        </long>
+    </description>
+
+    <homepage>https://github.com/rafaelfariasbsb/glpi-cloud-storage</homepage>
+    <download>https://github.com/rafaelfariasbsb/glpi-cloud-storage/releases</download>
+    <issues>https://github.com/rafaelfariasbsb/glpi-cloud-storage/issues</issues>
+    <readme>https://raw.githubusercontent.com/rafaelfariasbsb/glpi-cloud-storage/main/README.md</readme>
+
+    <authors>
+        <author>Rafael Farias</author>
+    </authors>
+
+    <versions>
+        <version>
+            <num>2.0.0</num>
+            <compatibility>~11.0.0</compatibility>
+            <download_url>https://github.com/rafaelfariasbsb/glpi-cloud-storage/releases/download/v2.0.0/cloudstorage-2.0.0.tar.gz</download_url>
+        </version>
+    </versions>
+
+    <langs>
+        <lang>en_GB</lang>
+        <lang>pt_BR</lang>
+    </langs>
+
+    <license>GPL-3.0-or-later</license>
+
+    <tags>
+        <en>
+            <tag>cloud storage</tag>
+            <tag>azure</tag>
+            <tag>blob storage</tag>
+            <tag>s3</tag>
+            <tag>documents</tag>
+            <tag>file storage</tag>
+        </en>
+    </tags>
+</root>
