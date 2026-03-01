@@ -7,6 +7,7 @@ use League\Flysystem\Filesystem;
 use League\Flysystem\FilesystemException;
 use MicrosoftAzure\Storage\Blob\BlobRestProxy;
 use MicrosoftAzure\Storage\Blob\BlobSharedAccessSignatureHelper;
+use MicrosoftAzure\Storage\Blob\Models\ListBlobsOptions;
 use MicrosoftAzure\Storage\Common\Internal\Resources;
 
 class AzureBlobClient
@@ -31,7 +32,18 @@ class AzureBlobClient
         $this->accountKey = $accountKey;
         $this->blobEndpoint = self::parseBlobEndpoint($connectionString, $accountName);
 
-        $this->blobClient = BlobRestProxy::createBlobService($connectionString);
+        try {
+            $this->blobClient = BlobRestProxy::createBlobService($connectionString);
+        } catch (\Throwable $e) {
+            throw new \RuntimeException(
+                sprintf(
+                    '[AzureBlobStorage] Invalid Azure credentials. Please check your Connection String in plugin settings. (Detail: %s)',
+                    self::sanitizeErrorMessage($e->getMessage())
+                ),
+                0,
+                $e
+            );
+        }
 
         $adapter = new AzureBlobStorageAdapter(
             $this->blobClient,
@@ -224,6 +236,9 @@ class AzureBlobClient
      */
     public function generateSasUrl(string $blobPath, int $expiryMinutes = 10): string
     {
+        // Ensure expiry is at least 1 minute to prevent immediately-expired SAS URLs
+        $expiryMinutes = max(1, $expiryMinutes);
+
         $helper = new BlobSharedAccessSignatureHelper(
             $this->accountName,
             $this->accountKey
@@ -256,11 +271,12 @@ class AzureBlobClient
     public function testConnection(): true|string
     {
         try {
-            // Try listing blobs (max 1) to verify connection
-            $this->blobClient->listBlobs($this->containerName);
+            $options = new ListBlobsOptions();
+            $options->setMaxResults(1);
+            $this->blobClient->listBlobs($this->containerName, $options);
             return true;
         } catch (\Throwable $e) {
-            return sprintf('Connection failed: %s', $e->getMessage());
+            return sprintf('Connection failed: %s', self::sanitizeErrorMessage($e->getMessage()));
         }
     }
 
@@ -274,5 +290,19 @@ class AzureBlobClient
         string $accountKey = ''
     ): self {
         return new self($connectionString, $containerName, $accountName, $accountKey);
+    }
+
+    /**
+     * Sanitize error messages to avoid leaking credentials in logs.
+     * Truncates long values that may contain keys or connection strings.
+     */
+    private static function sanitizeErrorMessage(string $message): string
+    {
+        // Replace long base64-like strings (keys, connection strings) with truncated version
+        return preg_replace(
+            "/['\"]([A-Za-z0-9+\/=]{40,})['\"]/",
+            "'***REDACTED***'",
+            $message
+        ) ?? $message;
     }
 }

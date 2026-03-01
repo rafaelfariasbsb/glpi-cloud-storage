@@ -17,14 +17,28 @@ class Config
         'enabled',
     ];
 
+    /** Fields encrypted via GLPI's SECURED_CONFIGS mechanism. */
+    private const SECURED_FIELDS = [
+        'connection_string',
+        'account_key',
+    ];
+
+    /** @var array<string, string>|null Per-request cache of decrypted config. */
+    private static ?array $cache = null;
+
     /**
      * Get all plugin configuration values.
+     * Secured fields are decrypted automatically. Cached per request.
      *
      * @return array<string, string>
      */
     public static function getPluginConfig(): array
     {
-        return \Config::getConfigurationValues(self::CONTEXT, self::CONFIG_KEYS);
+        if (self::$cache === null) {
+            $config = \Config::getConfigurationValues(self::CONTEXT, self::CONFIG_KEYS);
+            self::$cache = self::decryptSecuredFields($config);
+        }
+        return self::$cache;
     }
 
     /**
@@ -32,8 +46,35 @@ class Config
      */
     public static function get(string $key, string $default = ''): string
     {
-        $config = \Config::getConfigurationValues(self::CONTEXT, [$key]);
+        $config = self::getPluginConfig();
         return $config[$key] ?? $default;
+    }
+
+    /**
+     * Decrypt fields that are stored encrypted via SECURED_CONFIGS.
+     *
+     * @param array<string, string> $config
+     * @return array<string, string>
+     */
+    private static function decryptSecuredFields(array $config): array
+    {
+        $glpiKey = new \GLPIKey();
+        foreach (self::SECURED_FIELDS as $field) {
+            if (!empty($config[$field])) {
+                try {
+                    $decrypted = $glpiKey->decrypt($config[$field]);
+                    // GLPIKey::decrypt() returns empty string on failure
+                    $config[$field] = $decrypted !== '' ? $decrypted : $config[$field];
+                } catch (\Throwable $e) {
+                    trigger_error(
+                        sprintf('[AzureBlobStorage] Failed to decrypt config field "%s": %s', $field, $e->getMessage()),
+                        E_USER_WARNING
+                    );
+                    // Keep the raw value so the caller can still attempt to use it
+                }
+            }
+        }
+        return $config;
     }
 
     /**
@@ -44,6 +85,7 @@ class Config
     public static function set(array $values): void
     {
         \Config::setConfigurationValues(self::CONTEXT, $values);
+        self::$cache = null;
         AzureBlobClient::resetInstance();
     }
 

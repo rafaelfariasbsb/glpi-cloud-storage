@@ -90,6 +90,8 @@ function plugin_init_azureblobstorage(): void
         'Document' => [DocumentHook::class, 'onPreItemPurge'],
     ];
 
-    // JavaScript for URL rewriting
+    // JavaScript for URL rewriting.
+    // Path is relative to plugin URL root. GLPI 11's router maps this to
+    // public/js/url-rewriter.js on disk (see RequestRouterTrait::getTargetFile).
     $PLUGIN_HOOKS[Hooks::ADD_JAVASCRIPT]['azureblobstorage'] = ['js/url-rewriter.js'];
 }

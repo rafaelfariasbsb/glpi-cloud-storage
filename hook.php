@@ -65,6 +65,25 @@ function plugin_azureblobstorage_uninstall(): bool
     global $DB;
 
     if ($DB->tableExists('glpi_plugin_azureblobstorage_documenttrackers')) {
+        // Block uninstall if documents are still tracked in Azure
+        $result = $DB->request([
+            'COUNT' => 'total',
+            'FROM'  => 'glpi_plugin_azureblobstorage_documenttrackers',
+        ]);
+        $count = (int) ($result->current()['total'] ?? 0);
+        if ($count > 0) {
+            trigger_error(
+                sprintf(
+                    '[AzureBlobStorage] Cannot uninstall: %d documents are still tracked in Azure. '
+                    . 'Run "php bin/console plugins:azureblobstorage:migrate-local" first '
+                    . 'to download all documents back to local storage.',
+                    $count
+                ),
+                E_USER_ERROR
+            );
+            return false;
+        }
+
         $DB->doQuery("DROP TABLE `glpi_plugin_azureblobstorage_documenttrackers`");
     }
 

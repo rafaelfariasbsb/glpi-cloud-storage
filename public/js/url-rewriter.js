@@ -14,7 +14,20 @@
     'use strict';
 
     const CORE_PATTERN = /\/front\/document\.send\.php\?docid=/;
-    const PLUGIN_BASE = '/plugins/azureblobstorage/front/document.send.php';
+
+    // Derive base path dynamically from this script's own URL to support
+    // GLPI installations in subdirectories (e.g., /glpi/plugins/...)
+    const PLUGIN_BASE = (function () {
+        const scripts = document.querySelectorAll('script[src*="azureblobstorage"]');
+        for (const s of scripts) {
+            const src = s.getAttribute('src') || '';
+            const idx = src.indexOf('/plugins/azureblobstorage/');
+            if (idx !== -1) {
+                return src.substring(0, idx) + '/plugins/azureblobstorage/front/document.send.php';
+            }
+        }
+        return '/plugins/azureblobstorage/front/document.send.php';
+    })();
 
     /**
      * Rewrite a single URL string if it matches the core document pattern.

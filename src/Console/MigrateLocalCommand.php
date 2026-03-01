@@ -26,6 +26,12 @@ class MigrateLocalCommand extends AbstractCommand
                 100
             )
             ->addOption(
+                'delete-azure',
+                null,
+                InputOption::VALUE_NONE,
+                'Delete blobs from Azure after successful download (prevents orphaned blobs)'
+            )
+            ->addOption(
                 'dry-run',
                 null,
                 InputOption::VALUE_NONE,
@@ -39,9 +45,14 @@ class MigrateLocalCommand extends AbstractCommand
 
         $batchSize = (int) $input->getOption('batch-size');
         $dryRun = $input->getOption('dry-run');
+        $deleteAzure = $input->getOption('delete-azure');
 
         if ($dryRun) {
             $output->writeln('<info>DRY RUN - no changes will be made</info>');
+        }
+
+        if ($deleteAzure) {
+            $output->writeln('<comment>Azure blobs will be deleted after successful download</comment>');
         }
 
         // Count tracked documents using query builder
@@ -62,7 +73,7 @@ class MigrateLocalCommand extends AbstractCommand
         $downloaded = 0;
         $skipped = 0;
         $errors = 0;
-        $failedIds = [];
+        $excludedIds = [];
 
         // Process in batches to avoid OOM on large datasets
         while (true) {
@@ -71,9 +82,9 @@ class MigrateLocalCommand extends AbstractCommand
                 'LIMIT' => $batchSize,
             ];
 
-            if (!empty($failedIds)) {
+            if (!empty($excludedIds)) {
                 $criteria['WHERE'] = [
-                    'NOT' => ['id' => $failedIds],
+                    'NOT' => ['id' => $excludedIds],
                 ];
             }
 
@@ -97,26 +108,41 @@ class MigrateLocalCommand extends AbstractCommand
                         $filepath
                     ), OutputInterface::VERBOSITY_VERBOSE);
                     $downloaded++;
-                    $failedIds[] = (int) $record['id'];
+                    $excludedIds[] = (int) $record['id'];
                     continue;
                 }
 
-                // Skip if local file already exists
+                // Skip if local file already exists and matches expected SHA1
                 if (file_exists($localPath)) {
-                    $output->writeln(sprintf(
-                        '  <comment>Skipped document #%d: local file already exists</comment>',
-                        $docId
-                    ), OutputInterface::VERBOSITY_VERBOSE);
-                    $skipped++;
+                    $expectedSha1 = $record['sha1sum'] ?? '';
+                    $localSha1 = sha1_file($localPath);
+                    if (!empty($expectedSha1) && $localSha1 !== $expectedSha1) {
+                        $output->writeln(sprintf(
+                            '  <comment>Local file for document #%d has different SHA1 — downloading from Azure</comment>',
+                            $docId
+                        ), OutputInterface::VERBOSITY_VERBOSE);
+                        // Fall through to download the correct version
+                    } else {
+                        $output->writeln(sprintf(
+                            '  <comment>Skipped document #%d: local file already exists (SHA1 verified)</comment>',
+                            $docId
+                        ), OutputInterface::VERBOSITY_VERBOSE);
+                        $skipped++;
 
-                    // Remove tracking record since file is local
-                    DocumentTracker::removeByDocumentId($docId);
-                    continue;
+                        // Remove tracking record since file is confirmed local
+                        DocumentTracker::removeByDocumentId($docId);
+                        continue;
+                    }
                 }
 
                 try {
                     $client = AzureBlobClient::getInstance();
                     $client->downloadToFile($blobPath, $localPath);
+
+                    // Delete blob from Azure if requested
+                    if ($deleteAzure) {
+                        $client->delete($blobPath);
+                    }
 
                     // Remove tracking record
                     DocumentTracker::removeByDocumentId($docId);
@@ -129,7 +155,7 @@ class MigrateLocalCommand extends AbstractCommand
                     ), OutputInterface::VERBOSITY_VERBOSE);
                 } catch (\Throwable $e) {
                     $errors++;
-                    $failedIds[] = (int) $record['id'];
+                    $excludedIds[] = (int) $record['id'];
                     $output->writeln(sprintf(
                         '  <error>Failed document #%d (%s): %s</error>',
                         $docId,

@@ -16,6 +16,39 @@ GLPI stores all documents locally in `/files/`. This creates challenges in enter
 
 This plugin redirects storage to Azure Blob Storage: unlimited capacity, high availability, geo-redundancy, and native Microsoft integration.
 
+## Advantages of Azure Blob Storage
+
+| Feature | Local File Server | Azure Blob Storage |
+|---|---|---|
+| **Capacity** | Limited by disk/RAID | Virtually unlimited |
+| **Redundancy** | Manual (RAID + offsite backup) | Built-in LRS, GRS, RA-GRS |
+| **Availability** | Single point of failure | 99.9% SLA (99.99% RA-GRS) |
+| **Geo-replication** | Complex and expensive | Native (GRS replicates across regions) |
+| **Backup** | Separate infrastructure needed | Soft delete + versioning + immutability |
+| **Maintenance** | OS patches, disk replacements, monitoring | Zero - fully managed by Microsoft |
+| **Scaling** | Buy hardware, plan capacity | Automatic, pay-per-use |
+| **Containers/K8s** | Persistent volumes, NFS mounts | Native SDK - no mount needed |
+| **Multi-instance** | NFS/SMB share (latency, locking issues) | Single storage, multiple GLPI instances |
+| **Security** | Filesystem ACLs, firewall | SAS tokens, RBAC, encryption at rest, private endpoints |
+| **Disaster Recovery** | Tape/offsite replication | Cross-region replication in minutes |
+
+### Cost Comparison
+
+Estimated monthly cost for storing GLPI documents (storage only, East US region):
+
+| Volume | File Server (on-prem)¹ | Azure Blob Hot (LRS)² | Azure Blob Hot (GRS)² | Azure Blob Cool (LRS)² |
+|---|---|---|---|---|
+| **100 GB** | ~$150/mo | ~$2.30/mo | ~$4.60/mo | ~$1.30/mo |
+| **500 GB** | ~$170/mo | ~$11.50/mo | ~$23.00/mo | ~$6.50/mo |
+| **1 TB** | ~$200/mo | ~$23.00/mo | ~$46.00/mo | ~$13.00/mo |
+| **5 TB** | ~$350/mo | ~$115.00/mo | ~$230.00/mo | ~$65.00/mo |
+
+> ¹ **On-prem estimate** includes amortized hardware ($3-5K server over 36 months), Windows Server license, backup software, partial IT admin time, power/cooling. Does not include rack space, network, or disaster recovery infrastructure.
+>
+> ² **Azure estimate** based on [published pay-as-you-go pricing](https://azure.microsoft.com/en-us/pricing/details/storage/blobs/) (~$0.023/GB Hot LRS, ~$0.046/GB Hot GRS, ~$0.013/GB Cool LRS). Operations and egress costs are additional but negligible for typical GLPI usage (documents are written once, read occasionally). Ingress (uploads) is free.
+>
+> **Tip:** Most GLPI documents (old tickets, closed attachments) are rarely accessed. Using the **Cool** tier or [lifecycle management policies](https://learn.microsoft.com/en-us/azure/storage/blobs/lifecycle-management-overview) can reduce costs by 40-60%.
+
 ## Features
 
 - Upload documents to Azure Blob Storage automatically via GLPI hooks

@@ -98,7 +98,7 @@ class MigrateCommand extends AbstractCommand
         $uploaded = 0;
         $skipped = 0;
         $errors = 0;
-        $failedIds = [];
+        $excludedIds = [];
 
         while (true) {
             $criteria = [
@@ -120,9 +120,9 @@ class MigrateCommand extends AbstractCommand
                 'LIMIT' => $batchSize,
             ];
 
-            // Exclude previously failed document IDs to prevent infinite retry loop
-            if (!empty($failedIds)) {
-                $criteria['WHERE'][] = ['NOT' => ['d.id' => $failedIds]];
+            // Exclude already-processed IDs to prevent infinite loop
+            if (!empty($excludedIds)) {
+                $criteria['WHERE'][] = ['NOT' => ['d.id' => $excludedIds]];
             }
 
             $result = $DB->request($criteria);
@@ -145,7 +145,7 @@ class MigrateCommand extends AbstractCommand
                         $filepath
                     ), OutputInterface::VERBOSITY_VERBOSE);
                     $uploaded++;
-                    $failedIds[] = $docId;
+                    $excludedIds[] = $docId;
                     continue;
                 }
 
@@ -156,7 +156,7 @@ class MigrateCommand extends AbstractCommand
                         $filepath
                     ), OutputInterface::VERBOSITY_VERBOSE);
                     $skipped++;
-                    $failedIds[] = $docId;
+                    $excludedIds[] = $docId;
                     continue;
                 }
 
@@ -206,7 +206,7 @@ class MigrateCommand extends AbstractCommand
                     ), OutputInterface::VERBOSITY_VERBOSE);
                 } catch (\Throwable $e) {
                     $errors++;
-                    $failedIds[] = $docId;
+                    $excludedIds[] = $docId;
                     $output->writeln(sprintf(
                         '  <error>Failed document #%d (%s): %s</error>',
                         $docId,

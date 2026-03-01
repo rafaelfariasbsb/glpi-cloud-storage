@@ -37,9 +37,7 @@ class DocumentTracker extends CommonDBTM
      */
     public static function isInAzure(int $documentId): bool
     {
-        $tracker = new self();
-        $results = $tracker->find(['documents_id' => $documentId]);
-        return !empty($results);
+        return countElementsInTable(self::$table, ['documents_id' => $documentId]) > 0;
     }
 
     /**
@@ -64,9 +62,7 @@ class DocumentTracker extends CommonDBTM
      */
     public static function sha1ExistsInAzure(string $sha1sum): bool
     {
-        $tracker = new self();
-        $results = $tracker->find(['sha1sum' => $sha1sum], [], 1);
-        return !empty($results);
+        return countElementsInTable(self::$table, ['sha1sum' => $sha1sum]) > 0;
     }
 
     /**

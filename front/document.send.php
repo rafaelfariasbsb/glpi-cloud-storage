@@ -16,7 +16,6 @@ use GlpiPlugin\Azureblobstorage\AzureBlobClient;
 use GlpiPlugin\Azureblobstorage\Config;
 use GlpiPlugin\Azureblobstorage\DocumentTracker;
 use Symfony\Component\HttpFoundation\RedirectResponse;
-use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 include('../../../inc/includes.php');
@@ -47,16 +46,12 @@ if (!$doc->canViewFile($_GET)) {
 $tracking = DocumentTracker::getByDocumentId($docId);
 
 if ($tracking === null) {
-    // Not in Azure - redirect to core endpoint
-    $coreUrl = $doc->fields['filepath']
-        ? '/front/document.send.php?docid=' . $docId
-        : null;
-
-    if ($coreUrl !== null) {
-        // Check if file exists locally (it should if not in Azure)
+    // Not in Azure - serve from local if possible
+    if (!empty($doc->fields['filepath'])) {
         $localPath = GLPI_DOC_DIR . '/' . $doc->fields['filepath'];
         if (file_exists($localPath)) {
-            return $doc->getAsResponse();
+            $doc->getAsResponse()->send();
+            exit;
         }
     }
 
@@ -75,8 +70,8 @@ try {
         $client = AzureBlobClient::getInstance();
         $sasUrl = $client->generateSasUrl($blobPath, Config::getSasExpiryMinutes());
 
-        $response = new RedirectResponse($sasUrl, 302);
-        return $response;
+        (new RedirectResponse($sasUrl, 302))->send();
+        exit;
     }
 
     // Proxy mode: stream content through GLPI (memory-safe for large files)
@@ -84,6 +79,10 @@ try {
 
     $filename = $doc->fields['filename'] ?? basename($blobPath);
     $mime = $doc->fields['mime'] ?? 'application/octet-stream';
+
+    // Sanitize filename for Content-Disposition header (RFC 6266)
+    $safeFilename = preg_replace('/[^\x20-\x7E]/', '_', $filename);
+    $safeFilename = str_replace(['"', '\\'], '_', $safeFilename);
 
     // Determine if inline or attachment
     $disposition = 'attachment';
@@ -104,11 +103,17 @@ try {
         fclose($out);
     }, 200, [
         'Content-Type'        => $mime,
-        'Content-Disposition' => sprintf('%s; filename="%s"', $disposition, $filename),
+        'Content-Disposition' => sprintf(
+            '%s; filename="%s"; filename*=UTF-8\'\'%s',
+            $disposition,
+            $safeFilename,
+            rawurlencode($filename)
+        ),
         'Cache-Control'       => 'private, must-revalidate',
     ]);
 
-    return $response;
+    $response->send();
+    exit;
 } catch (\Throwable $e) {
     trigger_error(
         sprintf('[AzureBlobStorage] Download failed for document %d: %s', $docId, $e->getMessage()),
@@ -118,7 +123,8 @@ try {
     // Try to serve from local as fallback
     $localPath = GLPI_DOC_DIR . '/' . $doc->fields['filepath'];
     if (file_exists($localPath)) {
-        return $doc->getAsResponse();
+        $doc->getAsResponse()->send();
+        exit;
     }
 
     $exception = new NotFoundHttpException();
