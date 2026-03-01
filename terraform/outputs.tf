@@ -3,12 +3,12 @@
 # ─────────────────────────────────────────────
 output "glpi_url" {
   description = "GLPI application URL"
-  value       = "https://${azurerm_container_app.glpi.ingress[0].fqdn}"
+  value       = module.glpi.url
 }
 
 output "glpi_container_app_name" {
   description = "GLPI Container App name"
-  value       = azurerm_container_app.glpi.name
+  value       = module.glpi.container_app_name
 }
 
 # ─────────────────────────────────────────────
@@ -16,38 +16,38 @@ output "glpi_container_app_name" {
 # ─────────────────────────────────────────────
 output "mariadb_container_app_name" {
   description = "MariaDB Container App name"
-  value       = azurerm_container_app.mariadb.name
+  value       = module.database.container_app_name
 }
 
 # ─────────────────────────────────────────────
-# Storage (for Azure Blob Storage plugin)
+# Storage (for Azure Blob Storage plugin config)
 # ─────────────────────────────────────────────
 output "storage_account_name" {
   description = "Storage Account name (for plugin config)"
-  value       = azurerm_storage_account.documents.name
+  value       = module.storage.account_name
 }
 
 output "storage_container_name" {
   description = "Blob container name (for plugin config)"
-  value       = azurerm_storage_container.glpi_documents.name
+  value       = module.storage.container_name
 }
 
 output "storage_connection_string" {
   description = "Storage Account connection string (for plugin config)"
-  value       = azurerm_storage_account.documents.primary_connection_string
+  value       = module.storage.primary_connection_string
   sensitive   = true
 }
 
 output "storage_account_key" {
   description = "Storage Account primary key (for plugin config)"
-  value       = azurerm_storage_account.documents.primary_access_key
+  value       = module.storage.primary_access_key
   sensitive   = true
 }
 
 # ─────────────────────────────────────────────
-# Resource Group
+# Networking
 # ─────────────────────────────────────────────
 output "resource_group_name" {
   description = "Resource Group name"
-  value       = azurerm_resource_group.main.name
+  value       = module.networking.resource_group_name
 }

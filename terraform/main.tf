@@ -1,18 +1,3 @@
-terraform {
-  required_version = ">= 1.5"
-
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 4.0"
-    }
-  }
-}
-
-provider "azurerm" {
-  features {}
-}
-
 locals {
   prefix = "${var.project_name}-${var.environment}"
   tags = merge(var.tags, {
@@ -23,235 +8,78 @@ locals {
 }
 
 # ─────────────────────────────────────────────
-# Resource Group
+# Networking: Resource Group, Log Analytics, Container App Environment
 # ─────────────────────────────────────────────
-resource "azurerm_resource_group" "main" {
-  name     = "rg-${local.prefix}"
-  location = var.location
-  tags     = local.tags
+module "networking" {
+  source = "./modules/networking"
+
+  prefix             = local.prefix
+  location           = var.location
+  log_retention_days = var.log_retention_days
+  tags               = local.tags
 }
 
 # ─────────────────────────────────────────────
-# Storage Account + Blob Container (for GLPI documents)
+# Storage: Azure Blob Storage for GLPI documents
 # ─────────────────────────────────────────────
-resource "azurerm_storage_account" "documents" {
-  name                     = replace("st${local.prefix}docs", "-", "")
-  resource_group_name      = azurerm_resource_group.main.name
-  location                 = azurerm_resource_group.main.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  min_tls_version          = "TLS1_2"
+module "storage" {
+  source = "./modules/storage"
 
-  blob_properties {
-    versioning_enabled = true
-  }
-
-  tags = local.tags
-}
-
-resource "azurerm_storage_container" "glpi_documents" {
-  name                  = var.storage_container_name
-  storage_account_id    = azurerm_storage_account.documents.id
-  container_access_type = "private"
-}
-
-# ─────────────────────────────────────────────
-# Log Analytics Workspace (required for Container Apps)
-# ─────────────────────────────────────────────
-resource "azurerm_log_analytics_workspace" "main" {
-  name                = "log-${local.prefix}"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  sku                 = "PerGB2018"
-  retention_in_days   = 30
-  tags                = local.tags
-}
-
-# ─────────────────────────────────────────────
-# Container Apps Environment
-# ─────────────────────────────────────────────
-resource "azurerm_container_app_environment" "main" {
-  name                       = "cae-${local.prefix}"
-  resource_group_name        = azurerm_resource_group.main.name
-  location                   = azurerm_resource_group.main.location
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
+  prefix                     = local.prefix
+  resource_group_name        = module.networking.resource_group_name
+  location                   = module.networking.resource_group_location
+  container_name             = var.storage_container_name
+  replication_type           = var.storage_replication_type
+  soft_delete_retention_days = var.storage_soft_delete_days
   tags                       = local.tags
 }
 
 # ─────────────────────────────────────────────
-# Container Apps Environment Storage (persistent volume for MariaDB)
+# Database: MariaDB on Container Apps with persistent volume
 # ─────────────────────────────────────────────
-resource "azurerm_storage_account" "volumes" {
-  name                     = replace("st${local.prefix}vol", "-", "")
-  resource_group_name      = azurerm_resource_group.main.name
-  location                 = azurerm_resource_group.main.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  min_tls_version          = "TLS1_2"
-  tags                     = local.tags
-}
+module "database" {
+  source = "./modules/database"
 
-resource "azurerm_storage_share" "mariadb_data" {
-  name               = "mariadb-data"
-  storage_account_id = azurerm_storage_account.volumes.id
-  quota              = 10 # GB
-}
-
-resource "azurerm_container_app_environment_storage" "mariadb" {
-  name                         = "mariadb-data"
-  container_app_environment_id = azurerm_container_app_environment.main.id
-  account_name                 = azurerm_storage_account.volumes.name
-  share_name                   = azurerm_storage_share.mariadb_data.name
-  access_key                   = azurerm_storage_account.volumes.primary_access_key
-  access_mode                  = "ReadWrite"
-}
-
-# ─────────────────────────────────────────────
-# Container App: MariaDB
-# ─────────────────────────────────────────────
-resource "azurerm_container_app" "mariadb" {
-  name                         = "ca-${local.prefix}-db"
-  resource_group_name          = azurerm_resource_group.main.name
-  container_app_environment_id = azurerm_container_app_environment.main.id
-  revision_mode                = "Single"
+  prefix                       = local.prefix
+  resource_group_name          = module.networking.resource_group_name
+  location                     = module.networking.resource_group_location
+  container_app_environment_id = module.networking.container_app_environment_id
+  image                        = var.mariadb_image
+  cpu                          = var.mariadb_cpu
+  memory                       = var.mariadb_memory
+  admin_user                   = var.db_admin_user
+  admin_password               = var.db_admin_password
+  database_name                = var.db_name
+  volume_quota_gb              = var.mariadb_volume_quota_gb
   tags                         = local.tags
-
-  template {
-    min_replicas = 1
-    max_replicas = 1
-
-    container {
-      name   = "mariadb"
-      image  = var.mariadb_image
-      cpu    = 0.5
-      memory = "1Gi"
-
-      env {
-        name  = "MARIADB_ROOT_PASSWORD"
-        value = var.db_admin_password
-      }
-      env {
-        name  = "MARIADB_DATABASE"
-        value = var.db_name
-      }
-      env {
-        name  = "MARIADB_USER"
-        value = var.db_admin_user
-      }
-      env {
-        name  = "MARIADB_PASSWORD"
-        value = var.db_admin_password
-      }
-
-      volume_mounts {
-        name = "mariadb-data"
-        path = "/var/lib/mysql"
-      }
-    }
-
-    volume {
-      name         = "mariadb-data"
-      storage_name = azurerm_container_app_environment_storage.mariadb.name
-      storage_type = "AzureFile"
-    }
-  }
-
-  ingress {
-    external_traffic_weight {
-      latest_revision = true
-      percentage      = 100
-    }
-    target_port = 3306
-    transport   = "tcp"
-    exposed_port = 3306
-  }
 }
 
 # ─────────────────────────────────────────────
-# Container App: GLPI
+# GLPI: Application on Container Apps
 # ─────────────────────────────────────────────
-resource "azurerm_container_app" "glpi" {
-  name                         = "ca-${local.prefix}-app"
-  resource_group_name          = azurerm_resource_group.main.name
-  container_app_environment_id = azurerm_container_app_environment.main.id
-  revision_mode                = "Single"
-  tags                         = local.tags
+module "glpi" {
+  source = "./modules/glpi"
 
-  template {
-    min_replicas = 1
-    max_replicas = 3
+  prefix                       = local.prefix
+  resource_group_name          = module.networking.resource_group_name
+  container_app_environment_id = module.networking.container_app_environment_id
+  image                        = var.glpi_image
+  cpu                          = var.glpi_cpu
+  memory                       = var.glpi_memory
+  min_replicas                 = var.glpi_min_replicas
+  max_replicas                 = var.glpi_max_replicas
 
-    container {
-      name   = "glpi"
-      image  = var.glpi_image
-      cpu    = var.glpi_cpu
-      memory = var.glpi_memory
+  # Database connection
+  db_host     = module.database.container_app_name
+  db_name     = var.db_name
+  db_user     = var.db_admin_user
+  db_password = var.db_admin_password
 
-      # GLPI database configuration
-      env {
-        name  = "GLPI_DB_HOST"
-        value = azurerm_container_app.mariadb.name
-      }
-      env {
-        name  = "GLPI_DB_NAME"
-        value = var.db_name
-      }
-      env {
-        name  = "GLPI_DB_USER"
-        value = var.db_admin_user
-      }
-      env {
-        name        = "GLPI_DB_PASSWORD"
-        secret_name = "db-password"
-      }
+  # Azure Blob Storage (plugin)
+  storage_connection_string = module.storage.primary_connection_string
+  storage_account_name      = module.storage.account_name
+  storage_account_key       = module.storage.primary_access_key
+  storage_container_name    = module.storage.container_name
 
-      # Azure Blob Storage config (for the plugin)
-      env {
-        name        = "AZURE_STORAGE_CONNECTION_STRING"
-        secret_name = "azure-storage-connection-string"
-      }
-      env {
-        name  = "AZURE_STORAGE_CONTAINER"
-        value = var.storage_container_name
-      }
-      env {
-        name  = "AZURE_STORAGE_ACCOUNT_NAME"
-        value = azurerm_storage_account.documents.name
-      }
-      env {
-        name        = "AZURE_STORAGE_ACCOUNT_KEY"
-        secret_name = "azure-storage-key"
-      }
-    }
-  }
-
-  secret {
-    name  = "db-password"
-    value = var.db_admin_password
-  }
-
-  secret {
-    name  = "azure-storage-connection-string"
-    value = azurerm_storage_account.documents.primary_connection_string
-  }
-
-  secret {
-    name  = "azure-storage-key"
-    value = azurerm_storage_account.documents.primary_access_key
-  }
-
-  ingress {
-    external_traffic_weight {
-      latest_revision = true
-      percentage      = 100
-    }
-    target_port     = 80
-    external_enabled = true
-    transport       = "auto"
-
-    traffic_weight {
-      latest_revision = true
-      percentage      = 100
-    }
-  }
+  tags = local.tags
 }

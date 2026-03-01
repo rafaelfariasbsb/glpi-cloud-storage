@@ -1,26 +1,36 @@
 # Copy this file to terraform.tfvars and fill in your values
 # cp terraform.tfvars.example terraform.tfvars
 
+# ── General ──────────────────────────────────
 project_name = "glpi"
 location     = "eastus2"
-environment  = "dev"
+environment  = "dev" # dev, staging, prod
 
-# Database credentials
-db_admin_user     = "glpiadmin"
-db_admin_password = "CHANGE_ME_strong_password_123!"
-db_name           = "glpi"
+# ── Networking ───────────────────────────────
+log_retention_days = 30
 
-# Storage
-storage_container_name = "glpi-documents"
+# ── Storage (Azure Blob for documents) ───────
+storage_container_name   = "glpi-documents"
+storage_replication_type = "LRS"    # LRS, GRS, RAGRS, ZRS
+storage_soft_delete_days = 7        # 0 to disable
 
-# Container images
-glpi_image    = "glpi/glpi:latest"
-mariadb_image = "mariadb:11.8"
+# ── Database (MariaDB) ──────────────────────
+db_admin_user           = "glpiadmin"
+db_admin_password       = "CHANGE_ME_strong_password_123!"
+db_name                 = "glpi"
+mariadb_image           = "mariadb:11.8"
+mariadb_cpu             = 0.5
+mariadb_memory          = "1Gi"
+mariadb_volume_quota_gb = 10
 
-# GLPI resources
-glpi_cpu    = 1.0
-glpi_memory = "2Gi"
+# ── GLPI Application ────────────────────────
+glpi_image        = "glpi/glpi:latest"
+glpi_cpu          = 1.0
+glpi_memory       = "2Gi"
+glpi_min_replicas = 1
+glpi_max_replicas = 3
 
+# ── Tags ─────────────────────────────────────
 tags = {
   owner = "rafael"
 }
