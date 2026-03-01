@@ -1,0 +1,26 @@
+# Copy this file to terraform.tfvars and fill in your values
+# cp terraform.tfvars.example terraform.tfvars
+
+project_name = "glpi"
+location     = "eastus2"
+environment  = "dev"
+
+# Database credentials
+db_admin_user     = "glpiadmin"
+db_admin_password = "CHANGE_ME_strong_password_123!"
+db_name           = "glpi"
+
+# Storage
+storage_container_name = "glpi-documents"
+
+# Container images
+glpi_image    = "glpi/glpi:latest"
+mariadb_image = "mariadb:11.8"
+
+# GLPI resources
+glpi_cpu    = 1.0
+glpi_memory = "2Gi"
+
+tags = {
+  owner = "rafael"
+}

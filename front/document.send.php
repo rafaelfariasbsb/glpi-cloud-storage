@@ -1,0 +1,121 @@
+<?php
+
+/**
+ * Azure Blob Storage - Document download endpoint
+ *
+ * Replaces the core /front/document.send.php for documents stored in Azure.
+ * Replicates the same access control checks as the core endpoint.
+ *
+ * @license GPL-3.0-or-later
+ */
+
+use Glpi\Exception\Http\AccessDeniedHttpException;
+use Glpi\Exception\Http\BadRequestHttpException;
+use Glpi\Exception\Http\NotFoundHttpException;
+use GlpiPlugin\Azureblobstorage\AzureBlobClient;
+use GlpiPlugin\Azureblobstorage\Config;
+use GlpiPlugin\Azureblobstorage\DocumentTracker;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+include('../../../inc/includes.php');
+
+if (!isset($_GET['docid'])) {
+    $exception = new BadRequestHttpException();
+    $exception->setMessageToDisplay(__('Missing document ID'));
+    throw $exception;
+}
+
+$docId = (int) $_GET['docid'];
+$doc = new Document();
+
+if (!$doc->getFromDB($docId)) {
+    $exception = new NotFoundHttpException();
+    $exception->setMessageToDisplay(__('Unknown file'));
+    throw $exception;
+}
+
+// Replicate core access control
+if (!$doc->canViewFile($_GET)) {
+    $exception = new AccessDeniedHttpException();
+    $exception->setMessageToDisplay(__('Unauthorized access to this file'));
+    throw $exception;
+}
+
+// Check if document is tracked in Azure
+$tracking = DocumentTracker::getByDocumentId($docId);
+
+if ($tracking === null) {
+    // Not in Azure - redirect to core endpoint
+    $coreUrl = $doc->fields['filepath']
+        ? '/front/document.send.php?docid=' . $docId
+        : null;
+
+    if ($coreUrl !== null) {
+        // Check if file exists locally (it should if not in Azure)
+        $localPath = GLPI_DOC_DIR . '/' . $doc->fields['filepath'];
+        if (file_exists($localPath)) {
+            return $doc->getAsResponse();
+        }
+    }
+
+    $exception = new NotFoundHttpException();
+    $exception->setMessageToDisplay(sprintf(__('File %s not found.'), $doc->fields['filename']));
+    throw $exception;
+}
+
+// Document is in Azure - serve it
+$blobPath = $tracking['azure_blob_name'];
+$downloadMethod = Config::getDownloadMethod();
+
+try {
+    if ($downloadMethod === 'sas_redirect') {
+        // Generate SAS URL and redirect
+        $client = AzureBlobClient::getInstance();
+        $sasUrl = $client->generateSasUrl($blobPath, Config::getSasExpiryMinutes());
+
+        $response = new RedirectResponse($sasUrl, 302);
+        return $response;
+    }
+
+    // Proxy mode: stream content through GLPI
+    $client = AzureBlobClient::getInstance();
+    $content = $client->download($blobPath);
+
+    $filename = $doc->fields['filename'] ?? basename($blobPath);
+    $mime = $doc->fields['mime'] ?? 'application/octet-stream';
+
+    // Determine if inline or attachment
+    $disposition = 'attachment';
+    if (
+        str_starts_with($mime, 'image/')
+        || $mime === 'application/pdf'
+    ) {
+        $disposition = 'inline';
+    }
+
+    $response = new Response($content, 200, [
+        'Content-Type'        => $mime,
+        'Content-Disposition' => sprintf('%s; filename="%s"', $disposition, $filename),
+        'Content-Length'      => strlen($content),
+        'Cache-Control'       => 'private, must-revalidate',
+    ]);
+
+    return $response;
+} catch (\Throwable $e) {
+    trigger_error(
+        sprintf('[AzureBlobStorage] Download failed for document %d: %s', $docId, $e->getMessage()),
+        E_USER_WARNING
+    );
+
+    // Try to serve from local as fallback
+    $localPath = GLPI_DOC_DIR . '/' . $doc->fields['filepath'];
+    if (file_exists($localPath)) {
+        return $doc->getAsResponse();
+    }
+
+    $exception = new NotFoundHttpException();
+    $exception->setMessageToDisplay(__('File temporarily unavailable. Please try again later.'));
+    throw $exception;
+}

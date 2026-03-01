@@ -1,0 +1,23 @@
+{
+    "name": "glpi-plugin/azureblobstorage",
+    "description": "Store GLPI documents in Microsoft Azure Blob Storage",
+    "type": "glpi-plugin",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Rafael Farias",
+            "homepage": "https://github.com/rafaelfariasbsb"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "league/flysystem": "^3.0",
+        "league/flysystem-azure-blob-storage": "^3.0",
+        "microsoft/azure-storage-blob": "^1.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "GlpiPlugin\\Azureblobstorage\\": "src/"
+        }
+    }
+}

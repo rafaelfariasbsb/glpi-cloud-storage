@@ -1,0 +1,114 @@
+{% extends "generic_show_form.html.twig" %}
+{% import 'components/form/fields_macros.html.twig' as fields %}
+
+{% set target = 'config.form.php' %}
+
+{% block form_fields %}
+
+    {% set rand = random() %}
+
+    {{ fields.dropdownYesNo(
+        'enabled',
+        config['enabled'] ?? '0',
+        __('Enabled'),
+        {
+            'full_width': true,
+        }
+    ) }}
+
+    {{ fields.textField(
+        'account_name',
+        config['account_name'] ?? '',
+        __('Account Name'),
+        {
+            'full_width': true,
+            'add_field_html': '<i class="fas fa-info-circle" title="' ~ __('Azure Storage Account name') ~ '"></i>',
+        }
+    ) }}
+
+    {{ fields.passwordField(
+        'connection_string',
+        config['connection_string'] ?? '',
+        __('Connection String'),
+        {
+            'full_width': true,
+            'clearable': true,
+        }
+    ) }}
+
+    {{ fields.passwordField(
+        'account_key',
+        config['account_key'] ?? '',
+        __('Account Key'),
+        {
+            'full_width': true,
+            'clearable': true,
+        }
+    ) }}
+
+    {{ fields.textField(
+        'container_name',
+        config['container_name'] ?? 'glpi-documents',
+        __('Container Name'),
+        {
+            'full_width': true,
+        }
+    ) }}
+
+    {{ fields.dropdownArrayField(
+        'storage_mode',
+        config['storage_mode'] ?? 'azure_primary',
+        {
+            'azure_primary': __('Azure Primary') ~ ' - ' ~ __('Delete local copy after upload'),
+            'azure_backup': __('Azure Backup') ~ ' - ' ~ __('Keep both local and Azure copies'),
+        },
+        __('Storage Mode'),
+        {
+            'full_width': true,
+        }
+    ) }}
+
+    {{ fields.dropdownArrayField(
+        'download_method',
+        config['download_method'] ?? 'sas_redirect',
+        {
+            'sas_redirect': __('SAS Redirect') ~ ' - ' ~ __('Redirect browser to Azure temporary URL'),
+            'proxy': __('Proxy') ~ ' - ' ~ __('Stream through GLPI server'),
+        },
+        __('Download Method'),
+        {
+            'full_width': true,
+        }
+    ) }}
+
+    {{ fields.numberField(
+        'sas_expiry_minutes',
+        config['sas_expiry_minutes'] ?? '10',
+        __('SAS URL Expiry (minutes)'),
+        {
+            'full_width': true,
+            'min': 1,
+            'max': 1440,
+            'step': 1,
+        }
+    ) }}
+
+{% endblock %}
+
+{% block extra_form %}
+    <form method="POST" action="config.form.php">
+        <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="connection_string" value="{{ config['connection_string'] ?? '' }}" />
+        <input type="hidden" name="account_name" value="{{ config['account_name'] ?? '' }}" />
+        <input type="hidden" name="account_key" value="{{ config['account_key'] ?? '' }}" />
+        <input type="hidden" name="container_name" value="{{ config['container_name'] ?? 'glpi-documents' }}" />
+        <div class="card mt-3">
+            <div class="card-body">
+                <button type="submit" name="test_connection" class="btn btn-outline-secondary">
+                    <i class="fas fa-plug me-1"></i>
+                    {{ __('Test Connection') }}
+                </button>
+            </div>
+        </div>
+    </form>
+{% endblock %}
