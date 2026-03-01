@@ -47,7 +47,7 @@ class MigrateLocalCommand extends AbstractCommand
         // Count tracked documents using query builder
         $countResult = $DB->request([
             'COUNT' => 'total',
-            'FROM'  => 'glpi_plugin_azureblobstorage_documents',
+            'FROM'  => 'glpi_plugin_azureblobstorage_documenttrackers',
         ]);
         $total = (int) ($countResult->current()['total'] ?? 0);
 
@@ -67,7 +67,7 @@ class MigrateLocalCommand extends AbstractCommand
         // Process in batches to avoid OOM on large datasets
         while (true) {
             $criteria = [
-                'FROM'  => 'glpi_plugin_azureblobstorage_documents',
+                'FROM'  => 'glpi_plugin_azureblobstorage_documenttrackers',
                 'LIMIT' => $batchSize,
             ];
 

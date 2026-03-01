@@ -6,7 +6,7 @@ use CommonDBTM;
 
 class DocumentTracker extends CommonDBTM
 {
-    public static $table = 'glpi_plugin_azureblobstorage_documents';
+    public static $table = 'glpi_plugin_azureblobstorage_documenttrackers';
     public static $rightname = 'config';
 
     /**

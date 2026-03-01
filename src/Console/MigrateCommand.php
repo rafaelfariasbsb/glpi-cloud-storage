@@ -57,7 +57,7 @@ class MigrateCommand extends AbstractCommand
             'COUNT'     => 'total',
             'FROM'      => 'glpi_documents AS d',
             'LEFT JOIN' => [
-                'glpi_plugin_azureblobstorage_documents AS t' => [
+                'glpi_plugin_azureblobstorage_documenttrackers AS t' => [
                     'ON' => [
                         'd' => 'id',
                         't' => 'documents_id',
@@ -66,7 +66,6 @@ class MigrateCommand extends AbstractCommand
             ],
             'WHERE' => [
                 'NOT' => ['d.filepath' => null],
-                ['d.filepath', '!=', ''],
                 'd.filepath' => ['!=', ''],
                 't.id'       => null,
             ],
@@ -106,7 +105,7 @@ class MigrateCommand extends AbstractCommand
                 'SELECT' => ['d.id', 'd.filepath', 'd.sha1sum', 'd.filename'],
                 'FROM'      => 'glpi_documents AS d',
                 'LEFT JOIN' => [
-                    'glpi_plugin_azureblobstorage_documents AS t' => [
+                    'glpi_plugin_azureblobstorage_documenttrackers AS t' => [
                         'ON' => [
                             'd' => 'id',
                             't' => 'documents_id',
@@ -146,6 +145,7 @@ class MigrateCommand extends AbstractCommand
                         $filepath
                     ), OutputInterface::VERBOSITY_VERBOSE);
                     $uploaded++;
+                    $failedIds[] = $docId;
                     continue;
                 }
 

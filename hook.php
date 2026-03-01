@@ -10,8 +10,8 @@ function plugin_azureblobstorage_install(): bool
 {
     global $DB;
 
-    if (!$DB->tableExists('glpi_plugin_azureblobstorage_documents')) {
-        $query = "CREATE TABLE `glpi_plugin_azureblobstorage_documents` (
+    if (!$DB->tableExists('glpi_plugin_azureblobstorage_documenttrackers')) {
+        $query = "CREATE TABLE `glpi_plugin_azureblobstorage_documenttrackers` (
             `id` int unsigned NOT NULL AUTO_INCREMENT,
             `documents_id` int unsigned NOT NULL DEFAULT 0,
             `filepath` varchar(255) NOT NULL DEFAULT '',
@@ -25,7 +25,7 @@ function plugin_azureblobstorage_install(): bool
             KEY `sha1sum` (`sha1sum`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
-        if (!$DB->query($query)) {
+        if (!$DB->doQuery($query)) {
             trigger_error(
                 sprintf('[AzureBlobStorage] Error creating table: %s', $DB->error()),
                 E_USER_ERROR
@@ -64,8 +64,8 @@ function plugin_azureblobstorage_uninstall(): bool
 {
     global $DB;
 
-    if ($DB->tableExists('glpi_plugin_azureblobstorage_documents')) {
-        $DB->query("DROP TABLE `glpi_plugin_azureblobstorage_documents`");
+    if ($DB->tableExists('glpi_plugin_azureblobstorage_documenttrackers')) {
+        $DB->doQuery("DROP TABLE `glpi_plugin_azureblobstorage_documenttrackers`");
     }
 
     // Remove config values

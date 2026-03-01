@@ -7,7 +7,7 @@ This plugin does NOT modify any GLPI core files. It uses GLPI's native hook syst
 | Action | Does it? | Why |
 |--------|----------|-----|
 | Modify GLPI core files | **NO** | 100% hook-based |
-| Alter GLPI database tables | **NO** | Uses its own table (`glpi_plugin_azureblobstorage_documents`) |
+| Alter GLPI database tables | **NO** | Uses its own table (`glpi_plugin_azureblobstorage_documenttrackers`) |
 | Change login/auth flow | **NO** | Only intercepts document operations |
 | Interfere with pictures/inventories | **NO** | Only acts on managed documents (`?docid=`) |
 | Prevent normal operation if uninstalled | **NO** | Local documents keep working normally |
@@ -97,7 +97,7 @@ GLPI uses SHA1 to deduplicate files: two documents with the same content point t
 ## Database Schema
 
 ```sql
-CREATE TABLE `glpi_plugin_azureblobstorage_documents` (
+CREATE TABLE `glpi_plugin_azureblobstorage_documenttrackers` (
     `id` int unsigned NOT NULL AUTO_INCREMENT,
     `documents_id` int unsigned NOT NULL DEFAULT 0,
     `filepath` varchar(255) NOT NULL DEFAULT '',
