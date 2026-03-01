@@ -32,8 +32,8 @@ This plugin redirects storage to Azure Blob Storage, offering virtually unlimite
 ## Quick Start
 
 ```bash
-# 1. Copy the plugin folder to GLPI plugins directory
-cp -r azureblobstorage/ /path/to/glpi/plugins/azureblobstorage
+# 1. Clone or copy the plugin to GLPI plugins directory
+git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git /path/to/glpi/plugins/azureblobstorage
 
 # 2. Install PHP dependencies
 cd /path/to/glpi/plugins/azureblobstorage

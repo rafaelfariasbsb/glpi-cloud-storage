@@ -3,10 +3,10 @@
 ## Via Command Line (Recommended)
 
 ```bash
-# 1. Copy the plugin to GLPI plugins directory (or create a symlink)
-cp -r azureblobstorage /path/to/glpi/plugins/
+# 1. Clone or copy the plugin to GLPI plugins directory
+git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git /path/to/glpi/plugins/azureblobstorage
 # Alternative: symlink (ideal for development)
-# ln -s /path/to/azureblobstorage /path/to/glpi/plugins/azureblobstorage
+# ln -s /path/to/glpi-cloud-storage /path/to/glpi/plugins/azureblobstorage
 
 # 2. Install PHP dependencies
 cd /path/to/glpi/plugins/azureblobstorage
