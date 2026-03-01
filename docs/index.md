@@ -11,7 +11,7 @@
 
 ### For Users
 
-- [Installation](installation.md) — CLI install, Docker Compose, web interface, uninstall
+- [Installation](installation.md) — CLI install, web interface, uninstall
 - [Configuration](configuration.md) — Azure credentials, storage modes, download methods
 - [Migration](migration.md) — CLI migration commands and recommended strategy
 - [Security](security.md) — Credential encryption, SAS URLs, access control
@@ -19,8 +19,8 @@
 
 ### For Developers
 
-- [Architecture](architecture.md) — System design, hook flows, DB schema, dependencies, Terraform infrastructure
-- [Development Guide](development-guide.md) — Local setup, project conventions, testing, Terraform setup, source tree
+- [Architecture](architecture.md) — System design, hook flows, DB schema, dependencies
+- [Development Guide](development-guide.md) — Setup, project conventions, testing, source tree
 
 ## Quick Start
 

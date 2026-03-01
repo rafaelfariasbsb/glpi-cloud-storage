@@ -249,45 +249,6 @@ The plugin follows a **graceful degradation** pattern:
 
 All errors are logged via `trigger_error()` with `E_USER_WARNING` — they never prevent GLPI core operations from completing.
 
-## Infrastructure (Terraform)
-
-```
-┌─────────────────────────────────────────────┐
-│              Azure Cloud                     │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │   Module: networking                 │    │
-│  │   - Resource Group                   │    │
-│  │   - Log Analytics Workspace          │    │
-│  │   - Container App Environment        │    │
-│  └──────────────────────────────────────┘    │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │   Module: storage                    │    │
-│  │   - Storage Account (LRS/GRS/ZRS)    │    │
-│  │   - Blob Container (glpi-documents)  │    │
-│  │   - Soft delete + versioning         │    │
-│  └──────────────────────────────────────┘    │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │   Module: database                   │    │
-│  │   - MariaDB Container App            │    │
-│  │   - Azure File Share (persistent)    │    │
-│  └──────────────────────────────────────┘    │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │   Module: glpi                       │    │
-│  │   - GLPI Container App               │    │
-│  │   - Secrets (DB pass, storage keys)  │    │
-│  │   - External ingress (HTTPS)         │    │
-│  │   - Auto-scaling (1-3 replicas)      │    │
-│  └──────────────────────────────────────┘    │
-│                                              │
-└─────────────────────────────────────────────┘
-```
-
-See the [Terraform section in the Development Guide](development-guide.md#terraform-infrastructure) for setup instructions.
-
 ## Testing Strategy
 
 - PHPUnit 11.5 + Paratest (via GLPI test infrastructure)

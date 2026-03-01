@@ -1,10 +1,2 @@
 # PHP dependencies
 **/vendor/
-
-# Terraform
-.terraform/
-.terraform.lock.hcl
-*.tfstate
-*.tfstate.backup
-terraform/*.tfvars
-!terraform/terraform.tfvars.example

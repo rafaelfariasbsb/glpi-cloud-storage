@@ -19,27 +19,6 @@ php /path/to/glpi/bin/console plugin:install azureblobstorage -u glpi
 php /path/to/glpi/bin/console plugin:enable azureblobstorage
 ```
 
-## Via Docker Compose (Local Development)
-
-A `docker-compose.yml` is included with GLPI, MariaDB, and [Azurite](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite) (official Azure Storage emulator):
-
-```bash
-git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git
-cd glpi-cloud-storage
-
-# Start all services
-docker compose up -d
-
-# Install and enable the plugin
-docker compose exec glpi php bin/console plugin:install azureblobstorage -u glpi
-docker compose exec glpi php bin/console plugin:enable azureblobstorage
-```
-
-- **GLPI**: http://localhost:8080
-- **Azurite**: Blob service on port 10000 (well-known dev credentials, no setup needed)
-- The plugin is auto-mounted into GLPI's plugins directory
-- A `glpi-documents` container is auto-created on startup
-
 ## Via Web Interface
 
 1. Go to **Setup > Plugins**
