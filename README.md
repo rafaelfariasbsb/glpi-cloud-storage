@@ -77,6 +77,21 @@ php bin/console plugins:azureblobstorage:migrate --delete-local
 php bin/console plugins:azureblobstorage:migrate-local
 ```
 
+## Local Development
+
+A `docker-compose.yml` is included for local development using [Azurite](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite) (official Microsoft Azure Storage emulator):
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **GLPI** on http://localhost:8080
+- **MariaDB** with persistent data
+- **Azurite** (Azure Storage emulator) with a pre-created `glpi-documents` container
+
+The plugin is auto-mounted into GLPI's plugins directory. Azurite uses well-known development credentials (no setup needed).
+
 ## Infrastructure
 
 A Terraform configuration is included in [`terraform/`](terraform/) to deploy the full stack on Azure:
@@ -108,6 +123,7 @@ glpi-cloud-storage/
 ├── setup.php                  # Plugin registration and hooks
 ├── hook.php                   # Install/uninstall (DB table creation)
 ├── composer.json              # PHP dependencies
+├── docker-compose.yml         # Local dev (GLPI + MariaDB + Azurite)
 ├── front/
 │   ├── config.php             # Configuration page
 │   ├── config.form.php        # Configuration form handler
@@ -124,10 +140,17 @@ glpi-cloud-storage/
 │   └── config.html.twig       # Configuration UI template
 ├── js/
 │   └── url-rewriter.js        # Frontend URL rewriting
-├── terraform/                 # Azure infrastructure as code
+├── terraform/                 # Azure infrastructure (modular)
 │   ├── main.tf
 │   ├── variables.tf
-│   └── outputs.tf
+│   ├── outputs.tf
+│   ├── versions.tf
+│   ├── backend.tf
+│   └── modules/
+│       ├── networking/
+│       ├── storage/
+│       ├── database/
+│       └── glpi/
 └── docs/                      # Full documentation
 ```
 

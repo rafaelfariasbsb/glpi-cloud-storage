@@ -1,0 +1,89 @@
+# Local development environment for GLPI + Azure Blob Storage plugin
+# Uses Azurite (official Microsoft Azure Storage emulator)
+#
+# Usage:
+#   docker compose up -d
+#   Open http://localhost:8080 for GLPI
+#   Azurite connection string: see AZURE_STORAGE_CONNECTION_STRING below
+
+services:
+  # ── GLPI Application ────────────────────────
+  glpi:
+    image: glpi/glpi:latest
+    container_name: glpi-app
+    ports:
+      - "8080:80"
+    environment:
+      GLPI_DB_HOST: db
+      GLPI_DB_NAME: glpi
+      GLPI_DB_USER: glpi
+      GLPI_DB_PASSWORD: glpi
+      # Azurite default credentials (well-known dev account)
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      AZURE_STORAGE_ACCOUNT_NAME: devstoreaccount1
+      AZURE_STORAGE_ACCOUNT_KEY: "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+      AZURE_STORAGE_CONTAINER: glpi-documents
+    volumes:
+      # Mount the plugin into GLPI's plugins directory
+      - .:/var/www/glpi/plugins/azureblobstorage
+    depends_on:
+      db:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── MariaDB ─────────────────────────────────
+  db:
+    image: mariadb:11.8
+    container_name: glpi-db
+    environment:
+      MARIADB_ROOT_PASSWORD: glpi
+      MARIADB_DATABASE: glpi
+      MARIADB_USER: glpi
+      MARIADB_PASSWORD: glpi
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Azurite (Azure Storage Emulator) ────────
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: glpi-azurite
+    command: "azurite --blobHost 0.0.0.0 --blobPort 10000 --queueHost 0.0.0.0 --queuePort 10001 --tableHost 0.0.0.0 --tablePort 10002 --loose"
+    ports:
+      - "10000:10000"   # Blob service
+      - "10001:10001"   # Queue service
+      - "10002:10002"   # Table service
+    volumes:
+      - azurite_data:/data
+    restart: unless-stopped
+
+  # ── Azurite Init (create container on startup) ──
+  azurite-init:
+    image: mcr.microsoft.com/azure-cli
+    container_name: glpi-azurite-init
+    depends_on:
+      azurite:
+        condition: service_started
+    restart: "no"
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "Waiting for Azurite to be ready..."
+        sleep 3
+        az storage container create \
+          --name glpi-documents \
+          --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;" \
+          2>/dev/null || true
+        echo "Container 'glpi-documents' ready."
+
+volumes:
+  db_data:
+  azurite_data:
