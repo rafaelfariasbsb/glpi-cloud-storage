@@ -1,51 +1,104 @@
 # Development Guide
 
-## Prerequisites
+## Local Development Environment
+
+The project includes a Docker Compose setup with GLPI, MariaDB, and Azurite (official Microsoft Azure Storage emulator).
+
+### Prerequisites
 
 | Requirement | Version |
 |-------------|---------|
-| PHP | >= 8.2 |
-| Composer | Latest |
-| GLPI | 11.0.x |
+| Docker | Latest |
+| Docker Compose | v2+ |
+| Composer | 2.x |
+| PHP (optional, for IDE) | >= 8.2 |
 
-### Required PHP Extensions
+#### Required PHP Extensions (when running locally)
 
 - `ext-curl`
 - `ext-json`
 - `ext-openssl`
 
-## Installation for Development
+### Setup
 
 ```bash
-# Symlink or copy the plugin into GLPI's plugins directory
-ln -s /path/to/glpi-cloud-storage /path/to/glpi/plugins/azureblobstorage
+# 1. Clone the repository
+git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git
+cd glpi-cloud-storage
 
-# Install PHP dependencies
-cd /path/to/glpi/plugins/azureblobstorage
+# 2. Install PHP dependencies
 composer install
 
-# Install and enable via GLPI console
-php /path/to/glpi/bin/console plugin:install azureblobstorage -u glpi
-php /path/to/glpi/bin/console plugin:enable azureblobstorage
+# 3. Start the environment
+docker compose up -d
+
+# 4. Wait for services (~30s). Azurite init container auto-creates the blob container.
+
+# 5. Install and enable the plugin
+docker compose exec glpi php bin/console plugin:install azureblobstorage -u glpi
+docker compose exec glpi php bin/console plugin:enable azureblobstorage
 ```
 
-## Build Process
+Access GLPI at **http://localhost:8080** (admin: `glpi` / `glpi`).
 
-```bash
-# Install production dependencies only
-composer install --no-dev
+### Services
 
-# Install all dependencies (including dev tools)
-composer install
+| Service | Port | Description |
+|---------|------|-------------|
+| **glpi** | `localhost:8080` | GLPI with plugin mounted at `/var/www/glpi/plugins/azureblobstorage` |
+| **db** | 3306 (internal) | MariaDB 11.8 (`glpi/glpi/glpi`) |
+| **azurite** | `localhost:10000` | Azure Blob Storage emulator |
+| **azurite-init** | — | One-shot: creates `glpi-documents` container on startup |
+
+### Azurite Credentials (Dev Only)
+
+These are [well-known Azurite default credentials](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key), safe for local development:
+
+| Field | Value |
+|-------|-------|
+| Account Name | `devstoreaccount1` |
+| Account Key | `Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==` |
+| Container | `glpi-documents` |
+| Connection String | `DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;` |
+
+Enter these in **Setup > Plugins > Azure Blob Storage** after enabling the plugin.
+
+---
+
+## Project Structure
+
+```
+azureblobstorage/
+├── setup.php                  # Plugin registration, hooks, version
+├── hook.php                   # Install/uninstall (DB table management)
+├── composer.json              # PHP dependencies
+├── docker-compose.yml         # Local dev environment (GLPI + MariaDB + Azurite)
+├── front/
+│   ├── config.php             # Config page entry point
+│   ├── config.form.php        # Config form POST handler (with validation)
+│   └── document.send.php      # Download proxy endpoint
+├── src/
+│   ├── AzureBlobClient.php    # Azure SDK wrapper (Flysystem + SAS + retry + timeouts)
+│   ├── Config.php             # Plugin configuration (CRUD + cache + decrypt)
+│   ├── DocumentHook.php       # GLPI hook handlers (add/update/purge)
+│   ├── DocumentTracker.php    # Tracking table ORM (CommonDBTM)
+│   └── Console/
+│       ├── MigrateCommand.php      # CLI: migrate local → Azure
+│       └── MigrateLocalCommand.php # CLI: migrate Azure → local
+├── templates/
+│   └── config.html.twig       # Configuration UI (Twig template)
+├── public/js/
+│   └── url-rewriter.js        # Frontend URL rewriting for downloads
+└── docs/                      # Documentation
 ```
 
-The `Makefile` includes GLPI's `PluginsMakefile.mk` for standard plugin build targets.
+---
 
-## Project Conventions
+## Code Conventions
 
 ### Namespace
 
-All plugin classes use PSR-4 autoloading under `GlpiPlugin\Azureblobstorage\`:
+All classes use `GlpiPlugin\Azureblobstorage\` with PSR-4 autoloading:
 
 ```
 src/AzureBlobClient.php    → GlpiPlugin\Azureblobstorage\AzureBlobClient
@@ -61,74 +114,166 @@ src/Console/MigrateCommand → GlpiPlugin\Azureblobstorage\Console\MigrateComman
 - `templates/`: Twig templates (prefixed with `@azureblobstorage/`)
 - `public/js/`: JavaScript files injected via `Hooks::ADD_JAVASCRIPT`
 
-### Error Handling
+### Logging (Two-Tier Strategy)
 
-All plugin errors use `trigger_error()` with `E_USER_WARNING` to log without blocking GLPI core operations. The plugin should never prevent document creation, update, or deletion even if Azure is unavailable.
+Every catch block must log at both levels:
 
-## Source Tree
+```php
+// 1. PHP error log — one-line summary (GLPI standard pattern)
+trigger_error(
+    sprintf('[AzureBlobStorage] Upload failed for document %d: %s', $docId, $e->getMessage()),
+    E_USER_WARNING
+);
+
+// 2. Dedicated log file — structured detail + stack trace
+\Toolbox::logInFile('azureblobstorage', sprintf(
+    "UPLOAD FAILED | doc_id=%d | filepath=%s | error=%s\n%s\n",
+    $docId,
+    $filepath,
+    $e->getMessage(),
+    $e->getTraceAsString()
+));
+```
+
+Log message format: `OPERATION_TYPE | key=value | key=value\nstack trace\n`
+
+Log file: `files/_log/azureblobstorage.log`
+
+### Error Handling Rules
+
+1. **Never block GLPI core operations** — catch exceptions in hooks, don't re-throw
+2. **Never silently swallow errors** — every catch block must log at both levels
+3. **Notify admins on upload failure** — use `Session::addMessageAfterRedirect()` with `WARNING`
+4. **Sanitize credentials** — use `sanitizeErrorMessage()` before any external-facing output
+
+### Azure SDK Patterns
+
+- `BlobRestProxy::createBlobService()` with `http` options for Guzzle timeouts (`connect_timeout: 5`, `timeout: 30`)
+- `RetryMiddlewareFactory` with exponential backoff (3 retries, 1s base, retries on 408/5xx + connection errors)
+- Always use `writeStream()` (not `write()`) — streams avoid `memory_limit` issues
+- SAS URL generation uses `BlobSharedAccessSignatureHelper` — requires `account_key`
+- The SDK auto-chunks uploads >32MB into 4MB blocks via `createBlockBlobByMultipleUploadAsync`
+
+---
+
+## Key Design Decisions
+
+### Stream-Based Upload (Memory Safe)
+
+```php
+// CORRECT — stream, O(1) memory regardless of file size
+$stream = fopen($localPath, 'rb');
+$this->filesystem->writeStream($blobPath, $stream);
+
+// WRONG — loads entire file in memory, risks memory_limit
+$contents = file_get_contents($localPath);
+$this->filesystem->write($blobPath, $contents);
+```
+
+### Deferred Local Deletion
+
+Local files are deleted at PHP shutdown (not immediately after upload) via `register_shutdown_function()`. This is because GLPI's post-processing (`convertTagToImage`, thumbnail generation) may still need the local file after the Document hook fires.
+
+### Singleton AzureBlobClient
+
+Avoids creating multiple Azure SDK connections per request. Reset via `resetInstance()` when config changes.
+
+### Retry Configuration
 
 ```
-azureblobstorage/                   # Plugin root (= repo root)
-├── setup.php                       # [ENTRY POINT] Plugin registration, version, hook init
-├── hook.php                        # Install/uninstall hooks (DB table creation/removal)
-├── composer.json                   # PHP dependencies (flysystem, azure SDK)
-├── Makefile                        # Includes GLPI PluginsMakefile.mk
-├── README.md                       # Full project documentation
-│
-├── src/                            # [CORE] Plugin source code (PSR-4)
-│   ├── AzureBlobClient.php         # Flysystem + Azure SDK wrapper (singleton, upload/download/SAS)
-│   ├── Config.php                  # Plugin configuration management (GLPI Config API wrapper)
-│   ├── DocumentHook.php            # GLPI hook handlers (onItemAdd, onItemUpdate, onPreItemPurge)
-│   ├── DocumentTracker.php         # Tracking table ORM (CommonDBTM)
-│   └── Console/                    # Symfony Console commands
-│       ├── MigrateCommand.php      # CLI: migrate existing docs to Azure (batched, dedup-aware)
-│       └── MigrateLocalCommand.php # CLI: reverse migrate from Azure back to local
-│
-├── front/                          # [WEB] Front controllers (GLPI routing convention)
-│   ├── config.php                  # Configuration page (renders Twig template)
-│   ├── config.form.php             # Configuration form handler (save + test connection)
-│   └── document.send.php           # Download endpoint (SAS redirect or proxy streaming)
-│
-├── templates/                      # [UI] Twig templates
-│   └── config.html.twig            # Configuration form (extends generic_show_form.html.twig)
-│
-├── public/js/                      # [FRONTEND] Client-side JavaScript
-│   └── url-rewriter.js             # DOM URL rewriter (MutationObserver, rewrites docid URLs)
-│
-└── docs/                           # Documentation
-    ├── index.md                    # Documentation index
-    ├── architecture.md             # Technical architecture and design
-    ├── configuration.md            # Azure credentials, storage modes, download methods
-    ├── installation.md             # CLI install, Docker, web interface, uninstall
-    ├── migration.md                # Migration commands and strategy
-    ├── security.md                 # Security model and recommendations
-    ├── development-guide.md        # This file
-    └── faq.md                      # FAQ and troubleshooting
+Strategy:  Exponential backoff
+Retries:   3 attempts
+Backoff:   1s → 2s → 4s
+Triggers:  HTTP 408, 500, 502, 503, 504, connection errors
+Timeouts:  connect 5s, request 30s
+Worst-case (Azure fully down): ~22s before giving up
 ```
+
+---
 
 ## Testing
+
+### Framework
+
+- PHPUnit 11.5 + Paratest (parallel execution)
+- Base class: `Glpi\Tests\DbTestCase` (transaction rollback per test)
+- Filesystem mocking: `vfsStream`
+- Azure mocking: mock `AzureBlobClient` to avoid Azurite dependency in unit tests
 
 ### Running Tests
 
 ```bash
-# PHPUnit (from GLPI root)
-make phpunit
+# Inside GLPI container
+docker compose exec glpi bash
 
-# Parallel tests
+# Run plugin tests (from GLPI root)
+vendor/bin/phpunit plugins/azureblobstorage/tests/
+
+# Or via Makefile
+make phpunit
 make paratest p=8
 ```
 
-### Test Infrastructure
+### Test Classes (Planned)
 
-- Tests extend `DbTestCase` (provides transaction rollback, `createItem()`, `login()`, etc.)
-- `vfsStream` available for filesystem mocking
+| Class | Coverage |
+|-------|----------|
+| `DocumentHookTest` | onItemAdd, onItemUpdate, onPreItemPurge, dedup, azure_primary vs backup, error logging |
+| `DocumentTrackerTest` | track, isInAzure, sha1ExistsInAzure, countBySha1, removeByDocumentId |
+| `ConfigTest` | getPluginConfig, isEnabled, isAzurePrimary, cache invalidation, decrypt failure |
+| `AzureBlobClientTest` | upload, download, delete, exists, generateSasUrl, parseBlobEndpoint, retry behavior |
+| `MigrateCommandTest` | batch processing, dedup, --dry-run, --delete-local, error recovery |
 
-### Key Test Targets
+---
 
-| Class | What to Test |
-|-------|-------------|
-| `DocumentHook` | Upload on add, update on file change, delete on purge, deduplication, azure_primary vs backup mode |
-| `DocumentTracker` | track(), isInAzure(), sha1ExistsInAzure(), countBySha1(), removeByDocumentId() |
-| `Config` | getPluginConfig(), isEnabled(), isAzurePrimary(), getDownloadMethod(), cache invalidation |
-| `AzureBlobClient` | upload(), download(), generateSasUrl(), testConnection(), parseBlobEndpoint() |
-| `MigrateCommand` | Batch processing, dedup handling, --dry-run, --delete-local, error recovery |
+## Debugging
+
+### Log Files
+
+| Log | Location | Contents |
+|-----|----------|----------|
+| **Plugin log** | `files/_log/azureblobstorage.log` | All plugin operations with stack traces |
+| PHP errors | `files/_log/php-errors.log` | PHP warnings from `trigger_error()` |
+| GLPI log | `files/_log/glpi.log` | General GLPI application log |
+
+### Browsing Azurite Blobs
+
+Use [Azure Storage Explorer](https://azure.microsoft.com/products/storage/storage-explorer/) or the Azure CLI:
+
+```bash
+az storage blob list \
+  --container-name glpi-documents \
+  --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;" \
+  --output table
+```
+
+### Useful SQL Queries
+
+```sql
+-- Documents tracked in Azure
+SELECT dt.*, d.filename, d.filepath, d.sha1sum
+FROM glpi_plugin_azureblobstorage_documenttrackers dt
+JOIN glpi_documents d ON d.id = dt.documents_id;
+
+-- Orphaned trackers (document deleted but tracker remains)
+SELECT dt.*
+FROM glpi_plugin_azureblobstorage_documenttrackers dt
+LEFT JOIN glpi_documents d ON d.id = dt.documents_id
+WHERE d.id IS NULL;
+
+-- Documents NOT yet in Azure
+SELECT d.id, d.filename, d.filepath
+FROM glpi_documents d
+LEFT JOIN glpi_plugin_azureblobstorage_documenttrackers dt ON dt.documents_id = d.id
+WHERE dt.id IS NULL AND d.filepath != '';
+```
+
+## Build for Production
+
+```bash
+# Install production dependencies only (no dev tools)
+composer install --no-dev --optimize-autoloader
+
+# The vendor/ directory must be included in the deployment
+# (GLPI does not have a central Composer setup for plugins)
+```

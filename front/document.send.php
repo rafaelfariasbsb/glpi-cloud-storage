@@ -119,6 +119,14 @@ try {
         sprintf('[AzureBlobStorage] Download failed for document %d: %s', $docId, $e->getMessage()),
         E_USER_WARNING
     );
+    \Toolbox::logInFile('azureblobstorage', sprintf(
+        "DOWNLOAD FAILED | doc_id=%d | blob=%s | method=%s | error=%s\n%s\n",
+        $docId,
+        $blobPath,
+        $downloadMethod,
+        $e->getMessage(),
+        $e->getTraceAsString()
+    ));
 
     // Try to serve from local as fallback
     $localPath = GLPI_DOC_DIR . '/' . $doc->fields['filepath'];

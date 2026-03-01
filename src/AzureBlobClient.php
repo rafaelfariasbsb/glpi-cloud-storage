@@ -9,6 +9,7 @@ use MicrosoftAzure\Storage\Blob\BlobRestProxy;
 use MicrosoftAzure\Storage\Blob\BlobSharedAccessSignatureHelper;
 use MicrosoftAzure\Storage\Blob\Models\ListBlobsOptions;
 use MicrosoftAzure\Storage\Common\Internal\Resources;
+use MicrosoftAzure\Storage\Common\Middlewares\RetryMiddlewareFactory;
 
 class AzureBlobClient
 {
@@ -33,7 +34,21 @@ class AzureBlobClient
         $this->blobEndpoint = self::parseBlobEndpoint($connectionString, $accountName);
 
         try {
-            $this->blobClient = BlobRestProxy::createBlobService($connectionString);
+            $this->blobClient = BlobRestProxy::createBlobService($connectionString, [
+                'http' => [
+                    'connect_timeout' => 5,
+                    'timeout'         => 30,
+                ],
+            ]);
+            $this->blobClient->pushMiddleware(
+                RetryMiddlewareFactory::create(
+                    RetryMiddlewareFactory::GENERAL_RETRY_TYPE,
+                    3,
+                    1000,
+                    RetryMiddlewareFactory::EXPONENTIAL_INTERVAL_ACCUMULATION,
+                    true
+                )
+            );
         } catch (\Throwable $e) {
             throw new \RuntimeException(
                 sprintf(
@@ -204,6 +219,12 @@ class AzureBlobClient
                 sprintf('[AzureBlobStorage] Failed to delete blob %s: %s', $blobPath, $e->getMessage()),
                 E_USER_WARNING
             );
+            \Toolbox::logInFile('azureblobstorage', sprintf(
+                "DELETE FAILED | blob=%s | error=%s\n%s\n",
+                $blobPath,
+                $e->getMessage(),
+                $e->getTraceAsString()
+            ));
         }
     }
 
@@ -215,6 +236,16 @@ class AzureBlobClient
         try {
             return $this->filesystem->fileExists($blobPath);
         } catch (FilesystemException $e) {
+            trigger_error(
+                sprintf('[AzureBlobStorage] Failed to check blob existence for %s: %s', $blobPath, $e->getMessage()),
+                E_USER_WARNING
+            );
+            \Toolbox::logInFile('azureblobstorage', sprintf(
+                "EXISTS CHECK FAILED | blob=%s | error=%s\n%s\n",
+                $blobPath,
+                $e->getMessage(),
+                $e->getTraceAsString()
+            ));
             return false;
         }
     }

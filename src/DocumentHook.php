@@ -52,6 +52,22 @@ class DocumentHook
                 // Blob missing in Azure — fall through to re-upload
             } catch (\Throwable $e) {
                 // Cannot verify — fall through to upload as safety measure
+                trigger_error(
+                    sprintf(
+                        '[AzureBlobStorage] Dedup verification failed for document %d (%s): %s',
+                        $item->getID(),
+                        $filepath,
+                        $e->getMessage()
+                    ),
+                    E_USER_WARNING
+                );
+                \Toolbox::logInFile('azureblobstorage', sprintf(
+                    "DEDUP CHECK FAILED | doc_id=%d | filepath=%s | error=%s\n%s\n",
+                    $item->getID(),
+                    $filepath,
+                    $e->getMessage(),
+                    $e->getTraceAsString()
+                ));
             }
         }
 
@@ -79,6 +95,21 @@ class DocumentHook
                     $e->getMessage()
                 ),
                 E_USER_WARNING
+            );
+            \Toolbox::logInFile('azureblobstorage', sprintf(
+                "UPLOAD FAILED | doc_id=%d | filepath=%s | error=%s\n%s\n",
+                $item->getID(),
+                $filepath,
+                $e->getMessage(),
+                $e->getTraceAsString()
+            ));
+            \Session::addMessageAfterRedirect(
+                sprintf(
+                    __('[Azure Blob Storage] Upload to cloud storage failed for document "%s". The local copy was kept. Check files/_log/azureblobstorage.log for details.'),
+                    $item->fields['filename'] ?? $filepath
+                ),
+                false,
+                WARNING
             );
         }
     }
@@ -149,6 +180,20 @@ class DocumentHook
                 ),
                 E_USER_WARNING
             );
+            \Toolbox::logInFile('azureblobstorage', sprintf(
+                "UPDATE UPLOAD FAILED | doc_id=%d | error=%s\n%s\n",
+                $item->getID(),
+                $e->getMessage(),
+                $e->getTraceAsString()
+            ));
+            \Session::addMessageAfterRedirect(
+                sprintf(
+                    __('[Azure Blob Storage] Upload to cloud storage failed for document "%s". The local copy was kept. Check files/_log/azureblobstorage.log for details.'),
+                    $item->fields['filename'] ?? $newFilepath
+                ),
+                false,
+                WARNING
+            );
         }
     }
 
@@ -203,6 +248,13 @@ class DocumentHook
                 ),
                 E_USER_WARNING
             );
+            \Toolbox::logInFile('azureblobstorage', sprintf(
+                "PURGE DELETE FAILED | doc_id=%d | blob=%s | error=%s\n%s\n",
+                $documentId,
+                $blobPath,
+                $e->getMessage(),
+                $e->getTraceAsString()
+            ));
         }
     }
 
@@ -271,6 +323,12 @@ class DocumentHook
                     sprintf('[AzureBlobStorage] Orphan cleanup failed for %s: %s', $filepath, $e->getMessage()),
                     E_USER_WARNING
                 );
+                \Toolbox::logInFile('azureblobstorage', sprintf(
+                    "ORPHAN CLEANUP FAILED | filepath=%s | error=%s\n%s\n",
+                    $filepath,
+                    $e->getMessage(),
+                    $e->getTraceAsString()
+                ));
             }
         }
     }

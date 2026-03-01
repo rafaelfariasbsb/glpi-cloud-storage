@@ -213,7 +213,8 @@ AzureBlobClient (Singleton)
   ├── League\Flysystem\Filesystem
   ├── League\Flysystem\AzureBlobStorage\AzureBlobStorageAdapter
   ├── MicrosoftAzure\Storage\Blob\BlobRestProxy
-  └── MicrosoftAzure\Storage\Blob\BlobSharedAccessSignatureHelper
+  ├── MicrosoftAzure\Storage\Blob\BlobSharedAccessSignatureHelper
+  └── MicrosoftAzure\Storage\Common\Middlewares\RetryMiddlewareFactory
 
 DocumentTracker (extends CommonDBTM)
   └── GLPI: CommonDBTM, countElementsInTable
@@ -238,16 +239,40 @@ MigrateCommand / MigrateLocalCommand
 
 ## Error Handling Strategy
 
-The plugin follows a **graceful degradation** pattern:
+The plugin follows a **graceful degradation** pattern — Azure failures never block GLPI core operations.
 
-| Scenario | Behavior |
-|----------|----------|
-| Azure unavailable during upload | File stays local, error logged. Upload can be retried via migration CLI. |
-| Azure unavailable during download | Returns error. In backup mode, falls back to local file. |
-| Azure unavailable during delete | Document purge proceeds normally. Orphan blob cleaned later. |
-| Invalid credentials | "Test Connection" button alerts. Uploads fail gracefully. |
+### Resiliency
 
-All errors are logged via `trigger_error()` with `E_USER_WARNING` — they never prevent GLPI core operations from completing.
+| Layer | Mechanism | Details |
+|-------|-----------|---------|
+| **HTTP** | Guzzle timeouts | `connect_timeout: 5s`, `timeout: 30s` — prevents infinite hangs |
+| **Retry** | Azure SDK `RetryMiddlewareFactory` | Exponential backoff (1s → 2s → 4s), 3 retries, retries on 408/500/502/503/504 and connection errors |
+| **Fallback** | Graceful degradation | Upload fails → local kept; Download fails → serve local; Delete fails → purge proceeds |
+
+### Logging
+
+All errors are logged at two levels:
+
+| Target | Method | What |
+|--------|--------|------|
+| PHP error log | `trigger_error(E_USER_WARNING)` | One-line summary with `[AzureBlobStorage]` prefix |
+| `files/_log/azureblobstorage.log` | `Toolbox::logInFile()` | Full detail with structured context and stack traces |
+
+The dedicated log file (`azureblobstorage.log`) includes: operation type (UPLOAD FAILED, DELETE FAILED, etc.), document ID, blob path, error message, and full PHP stack trace for root cause analysis.
+
+### User Notification
+
+When an upload fails during document creation or update, the admin sees a warning via `Session::addMessageAfterRedirect()` directing them to check `files/_log/azureblobstorage.log`.
+
+### Failure Matrix
+
+| Scenario | Behavior | User sees | Logged |
+|----------|----------|-----------|--------|
+| Azure unavailable during upload | File stays local, error logged | Warning message after redirect | Yes (both levels) |
+| Azure unavailable during download | Falls back to local file. If no local → "temporarily unavailable" | Error page or local file | Yes (both levels) |
+| Azure unavailable during delete | Document purge proceeds normally. Orphan blob in Azure. | Nothing (transparent) | Yes (both levels) |
+| Invalid credentials | "Test Connection" button alerts on config page | Sanitized error message | Yes |
+| Dedup verification failure | Falls through to re-upload as safety measure | Nothing (transparent) | Yes (both levels) |
 
 ## Testing Strategy
 

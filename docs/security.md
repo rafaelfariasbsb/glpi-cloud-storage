@@ -56,6 +56,57 @@
 - SAS expiry is enforced to a minimum of 1 minute to prevent immediately-expired URLs
 - The `testConnection()` method uses paginated blob listing (`maxResults=1`) to prevent memory issues on large containers
 
+## Storage Tier & Lifecycle Management
+
+The plugin uploads all blobs using the **default access tier** of your storage account (typically Hot). It does not set or manage blob access tiers directly — this is by design.
+
+Azure provides native **Lifecycle Management policies** that automatically transition blobs between tiers based on age, without any application code:
+
+| Tier | Use Case | Cost (LRS, East US) |
+|------|----------|---------------------|
+| **Hot** | Frequently accessed documents (open tickets) | ~$0.023/GB/mo |
+| **Cool** | Infrequently accessed (closed tickets >30 days) | ~$0.013/GB/mo |
+| **Archive** | Rarely accessed (compliance, audit >180 days) | ~$0.002/GB/mo |
+
+### Recommended Policy
+
+Configure a Lifecycle Management policy on your Azure Storage Account to automatically move old documents to cheaper tiers. Example via Azure Portal:
+
+1. Go to **Storage Account > Data management > Lifecycle management**
+2. Add a rule:
+   - **Scope**: Apply to all blobs (or filter by container)
+   - Move to **Cool** tier after **30 days** since last modification
+   - Move to **Archive** tier after **180 days** since last modification
+   - Optionally delete after **365 days** if your retention policy allows
+
+Or via Azure CLI:
+
+```bash
+az storage account management-policy create \
+  --account-name <your-storage-account> \
+  --resource-group <your-resource-group> \
+  --policy '{
+    "rules": [{
+      "name": "glpi-document-tiering",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"]
+        },
+        "actions": {
+          "baseBlob": {
+            "tierToCool": { "daysAfterModificationGreaterThan": 30 },
+            "tierToArchive": { "daysAfterModificationGreaterThan": 180 }
+          }
+        }
+      }
+    }]
+  }'
+```
+
+> **Why not in the plugin?** Lifecycle policies are declarative infrastructure — they run at the storage level without API calls, code, or maintenance. Coupling tier management to GLPI ticket states would create unnecessary complexity and a tight dependency between storage and business logic.
+
 ## Recommendations
 
 1. Use **Azure RBAC** (Role-Based Access Control) for the Storage Account
@@ -63,3 +114,4 @@
 3. Enable **Azure Storage logging** to audit blob access
 4. Consider using **Azure Private Endpoints** for traffic that stays within your VNet
 5. Enable **soft delete** on the Azure container for accidental deletion recovery
+6. Configure **Lifecycle Management policies** to reduce storage costs (see above)

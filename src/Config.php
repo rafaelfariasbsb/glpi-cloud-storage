@@ -70,6 +70,12 @@ class Config
                         sprintf('[AzureBlobStorage] Failed to decrypt config field "%s": %s', $field, $e->getMessage()),
                         E_USER_WARNING
                     );
+                    \Toolbox::logInFile('azureblobstorage', sprintf(
+                        "DECRYPT FAILED | field=%s | error=%s\n%s\n",
+                        $field,
+                        $e->getMessage(),
+                        $e->getTraceAsString()
+                    ));
                     // Keep the raw value so the caller can still attempt to use it
                 }
             }
