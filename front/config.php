@@ -6,7 +6,7 @@
  * @license GPL-3.0-or-later
  */
 
-use Glpi\Plugin\Hooks;
+use Glpi\Application\View\TemplateRenderer;
 use GlpiPlugin\Azureblobstorage\Config;
 
 include('../../../inc/includes.php');
