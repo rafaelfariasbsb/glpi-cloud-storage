@@ -1,8 +1,8 @@
-# GLPI Cloud Storage - Azure Blob Storage Plugin
+# GLPI Cloud Storage Plugin
 
-Store GLPI documents and attachments in Microsoft Azure Blob Storage instead of the local filesystem.
+Store GLPI documents and attachments in cloud storage (Azure Blob Storage, AWS S3 planned) instead of the local filesystem.
 
-> **Zero core modifications**: This plugin works 100% via GLPI's native hook system. No GLPI core files are modified, added, or removed. Install and uninstall without any impact on your GLPI instance.
+> **Zero core modifications**: This plugin works 100% via GLPI's native hook system. No GLPI core files are modified, added, or removed.
 
 ## Why?
 
@@ -14,50 +14,25 @@ GLPI stores all documents locally in `/files/`. This creates challenges in enter
 - **Multi-instance** - Can't share documents across GLPI instances
 - **Containers** - Local storage is ephemeral in Docker/Kubernetes
 
-This plugin redirects storage to Azure Blob Storage: unlimited capacity, high availability, geo-redundancy, and native Microsoft integration.
-
-## Advantages of Azure Blob Storage
-
-| Feature | Local File Server | Azure Blob Storage |
-|---|---|---|
-| **Capacity** | Limited by disk/RAID | Virtually unlimited |
-| **Redundancy** | Manual (RAID + offsite backup) | Built-in LRS, GRS, RA-GRS |
-| **Availability** | Single point of failure | 99.9% SLA (99.99% RA-GRS) |
-| **Geo-replication** | Complex and expensive | Native (GRS replicates across regions) |
-| **Backup** | Separate infrastructure needed | Soft delete + versioning + immutability |
-| **Maintenance** | OS patches, disk replacements, monitoring | Zero - fully managed by Microsoft |
-| **Scaling** | Buy hardware, plan capacity | Automatic, pay-per-use |
-| **Containers/K8s** | Persistent volumes, NFS mounts | Native SDK - no mount needed |
-| **Multi-instance** | NFS/SMB share (latency, locking issues) | Single storage, multiple GLPI instances |
-| **Security** | Filesystem ACLs, firewall | SAS tokens, RBAC, encryption at rest, private endpoints |
-| **Disaster Recovery** | Tape/offsite replication | Cross-region replication in minutes |
-
-### Cost Comparison
-
-Estimated monthly cost for storing GLPI documents (storage only, East US region):
-
-| Volume | File Server (on-prem)¹ | Azure Blob Hot (LRS)² | Azure Blob Hot (GRS)² | Azure Blob Cool (LRS)² |
-|---|---|---|---|---|
-| **100 GB** | ~$150/mo | ~$2.30/mo | ~$4.60/mo | ~$1.30/mo |
-| **500 GB** | ~$170/mo | ~$11.50/mo | ~$23.00/mo | ~$6.50/mo |
-| **1 TB** | ~$200/mo | ~$23.00/mo | ~$46.00/mo | ~$13.00/mo |
-| **5 TB** | ~$350/mo | ~$115.00/mo | ~$230.00/mo | ~$65.00/mo |
-
-> ¹ **On-prem estimate** includes amortized hardware ($3-5K server over 36 months), Windows Server license, backup software, partial IT admin time, power/cooling. Does not include rack space, network, or disaster recovery infrastructure.
->
-> ² **Azure estimate** based on [published pay-as-you-go pricing](https://azure.microsoft.com/en-us/pricing/details/storage/blobs/) (~$0.023/GB Hot LRS, ~$0.046/GB Hot GRS, ~$0.013/GB Cool LRS). Operations and egress costs are additional but negligible for typical GLPI usage (documents are written once, read occasionally). Ingress (uploads) is free.
->
-> **Tip:** Most GLPI documents (old tickets, closed attachments) are rarely accessed. Using the **Cool** tier or [lifecycle management policies](https://learn.microsoft.com/en-us/azure/storage/blobs/lifecycle-management-overview) can reduce costs by 40-60%.
+This plugin redirects storage to cloud: unlimited capacity, high availability, geo-redundancy.
 
 ## Features
 
-- Upload documents to Azure Blob Storage automatically via GLPI hooks
-- Download via SAS URL redirect (fast, no server overhead) or proxy mode
+- Upload documents to cloud storage automatically via GLPI hooks
+- Download via temporary URL redirect (fast) or proxy mode (private)
 - SHA1-based deduplication (same as GLPI core)
 - Encrypted credential storage using GLPI's native `SECURED_CONFIGS`
 - CLI migration commands for existing documents
-- Graceful fallback - Azure failures never block GLPI operations
+- Graceful fallback — cloud failures never block GLPI operations
+- Path traversal protection and credential sanitization
 - Configuration UI integrated into GLPI's plugin settings
+
+## Supported Providers
+
+| Provider | Status | Package |
+|----------|--------|---------|
+| **Azure Blob Storage** | Available | `azure-oss/storage-blob-flysystem` |
+| **AWS S3** | Planned (Phase 2) | `league/flysystem-aws-s3-v3` |
 
 ## Requirements
 
@@ -65,49 +40,45 @@ Estimated monthly cost for storing GLPI documents (storage only, East US region)
 |-------------|---------|
 | GLPI | 11.0 |
 | PHP | 8.2 |
-| Azure | Storage Account with Blob Service |
+| Cloud | Azure Storage Account (or Azurite for dev) |
 
 ## Quick Start
 
 ```bash
-# 1. Clone or copy to GLPI plugins directory
-git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git /path/to/glpi/plugins/azureblobstorage
-# Or copy manually:
-# cp -r glpi-cloud-storage /path/to/glpi/plugins/azureblobstorage
+# 1. Clone to GLPI plugins directory
+git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git /path/to/glpi/plugins/cloudstorage
 
 # 2. Install PHP dependencies
-cd /path/to/glpi/plugins/azureblobstorage
+cd /path/to/glpi/plugins/cloudstorage
 composer install --no-dev
 
-# 3. Install and enable
-php /path/to/glpi/bin/console plugin:install azureblobstorage -u glpi
-php /path/to/glpi/bin/console plugin:enable azureblobstorage
+# 3. Install and activate
+php /path/to/glpi/bin/console plugin:install cloudstorage --username=glpi
+php /path/to/glpi/bin/console plugin:activate cloudstorage
 ```
 
-4. Go to **Setup > Plugins > Azure Blob Storage** and configure your credentials.
+4. Go to **Setup > Plugins > Cloud Storage**, configure credentials, and enable the plugin.
 
 ## Configuration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Storage Mode** | Azure Primary | `azure_primary` (delete local after upload) or `azure_backup` (keep both) |
-| **Download Method** | SAS Redirect | `sas_redirect` (302 to temporary Azure URL) or `proxy` (stream through GLPI) |
-| **SAS Expiry** | 10 min | Validity period for temporary download URLs |
+| **Provider** | Azure | `azure` (Azure Blob Storage) |
+| **Storage Mode** | Cloud Primary | `cloud_primary` (upload to cloud, clean local via CLI) or `cloud_backup` (keep both) |
+| **Download Method** | Redirect | `redirect` (302 to temporary URL) or `proxy` (stream through GLPI) |
+| **URL Expiry** | 5 min | Validity period for temporary download URLs |
 
 ## Migration
 
 ```bash
-# Migrate existing documents to Azure
-php bin/console plugins:azureblobstorage:migrate --batch-size=100
+# Migrate existing documents to cloud
+php bin/console plugins:cloudstorage:migrate --batch-size=100
 
 # Dry run (simulate)
-php bin/console plugins:azureblobstorage:migrate --dry-run
+php bin/console plugins:cloudstorage:migrate --dry-run
 
-# Migrate and remove local copies
-php bin/console plugins:azureblobstorage:migrate --delete-local
-
-# Reverse: download from Azure back to local
-php bin/console plugins:azureblobstorage:migrate-local
+# Reverse: download from cloud back to local
+php bin/console plugins:cloudstorage:migrate-local
 ```
 
 ## Documentation
@@ -124,27 +95,29 @@ php bin/console plugins:azureblobstorage:migrate-local
 ## Project Structure
 
 ```
-glpi-cloud-storage/
-├── setup.php                  # Plugin registration and hooks
-├── hook.php                   # Install/uninstall (DB table creation)
-├── composer.json              # PHP dependencies
+cloudstorage/
+├── setup.php                       # Plugin registration and hooks
+├── hook.php                        # Install/uninstall (DB + migration)
+├── composer.json                   # PHP dependencies
 ├── front/
-│   ├── config.php             # Configuration page
-│   ├── config.form.php        # Configuration form handler
-│   └── document.send.php      # Download proxy endpoint
+│   ├── config.php                  # Configuration page
+│   ├── config.form.php             # Configuration form handler
+│   └── document.send.php           # Download proxy/redirect endpoint
 ├── src/
-│   ├── AzureBlobClient.php    # Flysystem + Azure SDK wrapper
-│   ├── Config.php             # Plugin configuration management
-│   ├── DocumentTracker.php    # Document tracking table (CommonDBTM)
-│   ├── DocumentHook.php       # GLPI hook handlers
+│   ├── StorageClientInterface.php  # Cloud storage contract (9 methods)
+│   ├── StorageClientFactory.php    # Singleton factory for providers
+│   ├── AzureBlobClient.php         # Azure implementation (Flysystem + SAS)
+│   ├── Config.php                  # Plugin configuration management
+│   ├── DocumentTracker.php         # Document tracking table (CommonDBTM)
+│   ├── DocumentHook.php            # GLPI hook handlers (add/update/purge)
 │   └── Console/
-│       ├── MigrateCommand.php      # CLI: migrate to Azure
+│       ├── MigrateCommand.php      # CLI: migrate to cloud
 │       └── MigrateLocalCommand.php # CLI: migrate back to local
-├── templates/
-│   └── config.html.twig       # Configuration UI template
 ├── public/js/
-│   └── url-rewriter.js        # Frontend URL rewriting
-└── docs/                      # Full documentation
+│   └── url-rewriter.js             # Frontend URL rewriting
+├── templates/
+│   └── config.html.twig            # Configuration UI template
+└── docs/                           # Full documentation
 ```
 
 ## License

@@ -1,10 +1,11 @@
 <?php
 
-namespace GlpiPlugin\Azureblobstorage\Console;
+namespace GlpiPlugin\Cloudstorage\Console;
 
 use Glpi\Console\AbstractCommand;
-use GlpiPlugin\Azureblobstorage\AzureBlobClient;
-use GlpiPlugin\Azureblobstorage\DocumentTracker;
+use GlpiPlugin\Cloudstorage\StorageClientFactory;
+use GlpiPlugin\Cloudstorage\Config;
+use GlpiPlugin\Cloudstorage\DocumentTracker;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -16,8 +17,8 @@ class MigrateLocalCommand extends AbstractCommand
         parent::configure();
 
         $this
-            ->setName('plugins:azureblobstorage:migrate-local')
-            ->setDescription('Download documents from Azure Blob Storage back to local filesystem')
+            ->setName('plugins:cloudstorage:migrate-local')
+            ->setDescription('Download documents from cloud storage back to local filesystem')
             ->addOption(
                 'batch-size',
                 'b',
@@ -29,7 +30,7 @@ class MigrateLocalCommand extends AbstractCommand
                 'delete-azure',
                 null,
                 InputOption::VALUE_NONE,
-                'Delete blobs from Azure after successful download (prevents orphaned blobs)'
+                'Delete blobs from cloud storage after successful download (prevents orphaned blobs)'
             )
             ->addOption(
                 'dry-run',
@@ -43,7 +44,7 @@ class MigrateLocalCommand extends AbstractCommand
     {
         global $DB;
 
-        $batchSize = (int) $input->getOption('batch-size');
+        $batchSize = max(1, (int) $input->getOption('batch-size'));
         $dryRun = $input->getOption('dry-run');
         $deleteAzure = $input->getOption('delete-azure');
 
@@ -52,22 +53,22 @@ class MigrateLocalCommand extends AbstractCommand
         }
 
         if ($deleteAzure) {
-            $output->writeln('<comment>Azure blobs will be deleted after successful download</comment>');
+            $output->writeln('<comment>Remote blobs will be deleted after successful download</comment>');
         }
 
         // Count tracked documents using query builder
         $countResult = $DB->request([
             'COUNT' => 'total',
-            'FROM'  => 'glpi_plugin_azureblobstorage_documenttrackers',
+            'FROM'  => 'glpi_plugin_cloudstorage_documenttrackers',
         ]);
         $total = (int) ($countResult->current()['total'] ?? 0);
 
         if ($total === 0) {
-            $output->writeln('<info>No documents tracked in Azure. Nothing to migrate back.</info>');
+            $output->writeln('<info>No documents tracked in cloud storage. Nothing to migrate back.</info>');
             return 0;
         }
 
-        $output->writeln(sprintf('<info>Found %d documents to download from Azure</info>', $total));
+        $output->writeln(sprintf('<info>Found %d documents to download from cloud storage</info>', $total));
 
         $processed = 0;
         $downloaded = 0;
@@ -78,7 +79,7 @@ class MigrateLocalCommand extends AbstractCommand
         // Process in batches to avoid OOM on large datasets
         while (true) {
             $criteria = [
-                'FROM'  => 'glpi_plugin_azureblobstorage_documenttrackers',
+                'FROM'  => 'glpi_plugin_cloudstorage_documenttrackers',
                 'LIMIT' => $batchSize,
             ];
 
@@ -97,9 +98,20 @@ class MigrateLocalCommand extends AbstractCommand
             foreach ($batch as $record) {
                 $processed++;
                 $docId = (int) $record['documents_id'];
-                $blobPath = $record['azure_blob_name'];
+                $blobPath = $record['remote_path'];
                 $filepath = $record['filepath'];
-                $localPath = GLPI_DOC_DIR . '/' . $filepath;
+                try {
+                    $localPath = Config::validateLocalPath($filepath);
+                } catch (\RuntimeException $e) {
+                    $errors++;
+                    $excludedIds[] = (int) $record['id'];
+                    $output->writeln(sprintf(
+                        '  <error>Skipped document #%d: %s</error>',
+                        $docId,
+                        $e->getMessage()
+                    ));
+                    continue;
+                }
 
                 if ($dryRun) {
                     $output->writeln(sprintf(
@@ -118,7 +130,7 @@ class MigrateLocalCommand extends AbstractCommand
                     $localSha1 = sha1_file($localPath);
                     if (!empty($expectedSha1) && $localSha1 !== $expectedSha1) {
                         $output->writeln(sprintf(
-                            '  <comment>Local file for document #%d has different SHA1 — downloading from Azure</comment>',
+                            '  <comment>Local file for document #%d has different SHA1 — downloading from cloud storage</comment>',
                             $docId
                         ), OutputInterface::VERBOSITY_VERBOSE);
                         // Fall through to download the correct version
@@ -136,10 +148,27 @@ class MigrateLocalCommand extends AbstractCommand
                 }
 
                 try {
-                    $client = AzureBlobClient::getInstance();
+                    $client = StorageClientFactory::getInstance();
                     $client->downloadToFile($blobPath, $localPath);
 
-                    // Delete blob from Azure if requested
+                    // Fix 7: Verify downloaded file SHA1 matches tracker before removing
+                    $expectedSha1 = $record['sha1sum'] ?? '';
+                    if (!empty($expectedSha1) && file_exists($localPath)) {
+                        $downloadedSha1 = sha1_file($localPath);
+                        if ($downloadedSha1 !== $expectedSha1) {
+                            $output->writeln(sprintf(
+                                '  <error>SHA1 mismatch for document #%d after download (expected: %s, got: %s) — keeping tracker</error>',
+                                $docId,
+                                $expectedSha1,
+                                $downloadedSha1
+                            ));
+                            $errors++;
+                            $excludedIds[] = (int) $record['id'];
+                            continue;
+                        }
+                    }
+
+                    // Delete blob from cloud storage if requested
                     if ($deleteAzure) {
                         $client->delete($blobPath);
                     }

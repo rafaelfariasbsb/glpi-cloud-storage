@@ -1,11 +1,11 @@
 <?php
 
-namespace GlpiPlugin\Azureblobstorage\Console;
+namespace GlpiPlugin\Cloudstorage\Console;
 
 use Glpi\Console\AbstractCommand;
-use GlpiPlugin\Azureblobstorage\AzureBlobClient;
-use GlpiPlugin\Azureblobstorage\Config;
-use GlpiPlugin\Azureblobstorage\DocumentTracker;
+use GlpiPlugin\Cloudstorage\StorageClientFactory;
+use GlpiPlugin\Cloudstorage\Config;
+use GlpiPlugin\Cloudstorage\DocumentTracker;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -17,8 +17,8 @@ class MigrateCommand extends AbstractCommand
         parent::configure();
 
         $this
-            ->setName('plugins:azureblobstorage:migrate')
-            ->setDescription('Migrate existing GLPI documents to Azure Blob Storage')
+            ->setName('plugins:cloudstorage:migrate')
+            ->setDescription('Migrate existing GLPI documents to cloud storage')
             ->addOption(
                 'batch-size',
                 'b',
@@ -30,7 +30,7 @@ class MigrateCommand extends AbstractCommand
                 'delete-local',
                 'd',
                 InputOption::VALUE_NONE,
-                'Delete local file after successful upload to Azure'
+                'Delete local file after successful upload to cloud storage'
             )
             ->addOption(
                 'dry-run',
@@ -44,7 +44,7 @@ class MigrateCommand extends AbstractCommand
     {
         global $DB;
 
-        $batchSize = (int) $input->getOption('batch-size');
+        $batchSize = max(1, (int) $input->getOption('batch-size'));
         $deleteLocal = $input->getOption('delete-local');
         $dryRun = $input->getOption('dry-run');
 
@@ -57,7 +57,7 @@ class MigrateCommand extends AbstractCommand
             'COUNT'     => 'total',
             'FROM'      => 'glpi_documents AS d',
             'LEFT JOIN' => [
-                'glpi_plugin_azureblobstorage_documenttrackers AS t' => [
+                'glpi_plugin_cloudstorage_documenttrackers AS t' => [
                     'ON' => [
                         'd' => 'id',
                         't' => 'documents_id',
@@ -74,7 +74,7 @@ class MigrateCommand extends AbstractCommand
         $total = (int) ($countResult->current()['total'] ?? 0);
 
         if ($total === 0) {
-            $output->writeln('<info>No documents to migrate. All documents are already tracked in Azure.</info>');
+            $output->writeln('<info>No documents to migrate. All documents are already tracked in cloud storage.</info>');
             return 0;
         }
 
@@ -82,14 +82,14 @@ class MigrateCommand extends AbstractCommand
 
         if (!$dryRun) {
             try {
-                $client = AzureBlobClient::getInstance();
+                $client = StorageClientFactory::getInstance();
                 $testResult = $client->testConnection();
                 if ($testResult !== true) {
-                    $output->writeln(sprintf('<error>Azure connection failed: %s</error>', $testResult));
+                    $output->writeln(sprintf('<error>Cloud storage connection failed: %s</error>', $testResult));
                     return 1;
                 }
             } catch (\Throwable $e) {
-                $output->writeln(sprintf('<error>Azure connection error: %s</error>', $e->getMessage()));
+                $output->writeln(sprintf('<error>Cloud storage connection error: %s</error>', $e->getMessage()));
                 return 1;
             }
         }
@@ -105,7 +105,7 @@ class MigrateCommand extends AbstractCommand
                 'SELECT' => ['d.id', 'd.filepath', 'd.sha1sum', 'd.filename'],
                 'FROM'      => 'glpi_documents AS d',
                 'LEFT JOIN' => [
-                    'glpi_plugin_azureblobstorage_documenttrackers AS t' => [
+                    'glpi_plugin_cloudstorage_documenttrackers AS t' => [
                         'ON' => [
                             'd' => 'id',
                             't' => 'documents_id',
@@ -136,7 +136,18 @@ class MigrateCommand extends AbstractCommand
                 $docId = (int) $doc['id'];
                 $filepath = $doc['filepath'];
                 $sha1sum = $doc['sha1sum'] ?? '';
-                $localPath = GLPI_DOC_DIR . '/' . $filepath;
+                try {
+                    $localPath = Config::validateLocalPath($filepath);
+                } catch (\RuntimeException $e) {
+                    $errors++;
+                    $excludedIds[] = $docId;
+                    $output->writeln(sprintf(
+                        '  <error>Skipped document #%d: %s</error>',
+                        $docId,
+                        $e->getMessage()
+                    ));
+                    continue;
+                }
 
                 if ($dryRun) {
                     $output->writeln(sprintf(
@@ -161,14 +172,14 @@ class MigrateCommand extends AbstractCommand
                 }
 
                 // Check deduplication: if SHA1 already in Azure, just track
-                if (!empty($sha1sum) && DocumentTracker::sha1ExistsInAzure($sha1sum)) {
+                if (!empty($sha1sum) && DocumentTracker::sha1Exists($sha1sum)) {
                     $fileSize = filesize($localPath) ?: 0;
                     DocumentTracker::track($docId, $filepath, $sha1sum, $fileSize);
 
                     if ($deleteLocal) {
                         if (!unlink($localPath)) {
                             trigger_error(
-                                sprintf('[AzureBlobStorage] Failed to delete local file: %s', $localPath),
+                                sprintf('[CloudStorage] Failed to delete local file: %s', $localPath),
                                 E_USER_WARNING
                             );
                         }
@@ -176,14 +187,14 @@ class MigrateCommand extends AbstractCommand
 
                     $uploaded++;
                     $output->writeln(sprintf(
-                        '  Tracked document #%d (deduplicated, SHA1 already in Azure)',
+                        '  Tracked document #%d (deduplicated, SHA1 already in cloud storage)',
                         $docId
                     ), OutputInterface::VERBOSITY_VERBOSE);
                     continue;
                 }
 
                 try {
-                    $client = AzureBlobClient::getInstance();
+                    $client = StorageClientFactory::getInstance();
                     $client->upload($filepath, $localPath);
 
                     $fileSize = filesize($localPath) ?: 0;
@@ -192,7 +203,7 @@ class MigrateCommand extends AbstractCommand
                     if ($deleteLocal) {
                         if (!unlink($localPath)) {
                             trigger_error(
-                                sprintf('[AzureBlobStorage] Failed to delete local file: %s', $localPath),
+                                sprintf('[CloudStorage] Failed to delete local file: %s', $localPath),
                                 E_USER_WARNING
                             );
                         }

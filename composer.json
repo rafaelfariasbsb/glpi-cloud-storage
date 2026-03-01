@@ -1,6 +1,6 @@
 {
-    "name": "glpi-plugin/azureblobstorage",
-    "description": "Store GLPI documents in Microsoft Azure Blob Storage",
+    "name": "glpi-plugin/cloudstorage",
+    "description": "Store GLPI documents in cloud storage (Azure Blob, AWS S3)",
     "type": "glpi-plugin",
     "license": "GPL-3.0-or-later",
     "authors": [
@@ -11,13 +11,14 @@
     ],
     "require": {
         "php": ">=8.2",
-        "league/flysystem": "^3.0",
-        "league/flysystem-azure-blob-storage": "^3.0",
-        "microsoft/azure-storage-blob": "^1.5"
+        "league/flysystem": "^3.28",
+        "azure-oss/storage-blob-flysystem": "^1.4",
+        "league/flysystem-aws-s3-v3": "^3.0",
+        "aws/aws-sdk-php": "^3.295"
     },
     "autoload": {
         "psr-4": {
-            "GlpiPlugin\\Azureblobstorage\\": "src/"
+            "GlpiPlugin\\Cloudstorage\\": "src/"
         }
     }
 }

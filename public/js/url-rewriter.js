@@ -1,141 +1,102 @@
 /**
- * Azure Blob Storage for GLPI - URL Rewriter
+ * Cloud Storage URL Rewriter
  *
- * Rewrites document download URLs from the core endpoint
- * (/front/document.send.php?docid=X) to the plugin endpoint
- * (/plugins/azureblobstorage/front/document.send.php?docid=X).
+ * Rewrites core document.send.php URLs to the plugin's endpoint,
+ * so documents stored in cloud storage are served correctly.
  *
- * Only rewrites URLs with ?docid= parameter.
- * Never rewrites URLs with ?file= parameter (pictures, inventories).
- *
- * @license GPL-3.0-or-later
+ * Watches for dynamically added elements (e.g. rich-text editor previews)
+ * using a MutationObserver on childList only (not attributes) to avoid loops.
  */
 (function () {
     'use strict';
 
-    const CORE_PATTERN = /\/front\/document\.send\.php\?docid=/;
+    var PLUGIN_MARKER = '/plugins/cloudstorage/';
+    var CORE_SEND = '/front/document.send.php';
 
-    // Derive base path dynamically from this script's own URL to support
-    // GLPI installations in subdirectories (e.g., /glpi/plugins/...)
-    const PLUGIN_BASE = (function () {
-        const scripts = document.querySelectorAll('script[src*="azureblobstorage"]');
-        for (const s of scripts) {
-            const src = s.getAttribute('src') || '';
-            const idx = src.indexOf('/plugins/azureblobstorage/');
-            if (idx !== -1) {
-                return src.substring(0, idx) + '/plugins/azureblobstorage/front/document.send.php';
-            }
+    // Derive plugin base URL from this script's own src
+    var PLUGIN_BASE = (function () {
+        var scriptSrc = document.currentScript ? document.currentScript.src : '';
+        var idx = scriptSrc.indexOf('/plugins/');
+        if (idx !== -1) {
+            return scriptSrc.substring(0, idx) + '/plugins/cloudstorage/front/document.send.php';
         }
-        return '/plugins/azureblobstorage/front/document.send.php';
+        return '/plugins/cloudstorage/front/document.send.php';
     })();
 
     /**
-     * Rewrite a single URL string if it matches the core document pattern.
-     *
-     * @param {string} url Original URL
-     * @returns {string} Rewritten URL or original if no match
+     * Check if a URL needs rewriting (core document.send.php → plugin endpoint).
+     */
+    function needsRewrite(url) {
+        if (!url) return false;
+        // Already points to plugin — skip
+        if (url.indexOf(PLUGIN_MARKER) !== -1) return false;
+        // Must contain the core endpoint
+        if (url.indexOf(CORE_SEND) === -1) return false;
+        // Must have a recognized query parameter
+        return url.indexOf('document.send.php?docid=') !== -1
+            || url.indexOf('document.send.php?file=') !== -1;
+    }
+
+    /**
+     * Rewrite a core document URL to the plugin endpoint.
      */
     function rewriteUrl(url) {
-        if (!url || !CORE_PATTERN.test(url)) {
-            return url;
-        }
-
-        // Extract query string (everything after document.send.php)
-        const idx = url.indexOf('document.send.php');
-        if (idx === -1) {
-            return url;
-        }
-
-        const queryPart = url.substring(idx + 'document.send.php'.length);
+        var idx = url.indexOf('document.send.php');
+        var queryPart = url.substring(idx + 'document.send.php'.length);
         return PLUGIN_BASE + queryPart;
     }
 
     /**
-     * Process a single DOM element, rewriting relevant URLs.
-     *
-     * @param {Element} element
+     * Process a single element, rewriting its relevant attribute if needed.
      */
-    function processElement(element) {
-        // Links (a[href])
-        if (element.tagName === 'A' && element.href) {
-            const href = element.getAttribute('href');
-            if (href && CORE_PATTERN.test(href)) {
-                element.setAttribute('href', rewriteUrl(href));
-            }
+    function processElement(el) {
+        var attr;
+        switch (el.tagName) {
+            case 'A':      attr = 'href'; break;
+            case 'IMG':    attr = 'src';  break;
+            case 'OBJECT': attr = 'data'; break;
+            case 'EMBED':  attr = 'src';  break;
+            default: return;
         }
 
-        // Images (img[src]) - inline images in rich text
-        if (element.tagName === 'IMG' && element.src) {
-            const src = element.getAttribute('src');
-            if (src && CORE_PATTERN.test(src)) {
-                element.setAttribute('src', rewriteUrl(src));
-            }
-        }
-
-        // Objects/Embeds (object[data], embed[src])
-        if (element.tagName === 'OBJECT' && element.data) {
-            const data = element.getAttribute('data');
-            if (data && CORE_PATTERN.test(data)) {
-                element.setAttribute('data', rewriteUrl(data));
-            }
-        }
-
-        if (element.tagName === 'EMBED' && element.src) {
-            const src = element.getAttribute('src');
-            if (src && CORE_PATTERN.test(src)) {
-                element.setAttribute('src', rewriteUrl(src));
-            }
+        var val = el.getAttribute(attr);
+        if (needsRewrite(val)) {
+            el.setAttribute(attr, rewriteUrl(val));
         }
     }
 
     /**
-     * Scan and rewrite all matching elements in a subtree.
-     *
-     * @param {Element|Document} root
+     * Scan a DOM subtree for elements that need URL rewriting.
      */
     function scanAndRewrite(root) {
-        const selectors = [
-            'a[href*="document.send.php?docid="]',
-            'img[src*="document.send.php?docid="]',
-            'object[data*="document.send.php?docid="]',
-            'embed[src*="document.send.php?docid="]',
-        ];
-
-        const elements = root.querySelectorAll(selectors.join(', '));
-        elements.forEach(processElement);
+        var elements = root.querySelectorAll(
+            'a[href*="document.send.php?"], img[src*="document.send.php?"], '
+            + 'object[data*="document.send.php?"], embed[src*="document.send.php?"]'
+        );
+        for (var i = 0; i < elements.length; i++) {
+            processElement(elements[i]);
+        }
     }
 
-    // Initial scan when DOM is ready
+    // Initial scan
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function () {
-            scanAndRewrite(document);
-        });
+        document.addEventListener('DOMContentLoaded', function () { scanAndRewrite(document); });
     } else {
         scanAndRewrite(document);
     }
 
-    // MutationObserver for dynamically loaded content (AJAX, timeline, etc.)
-    const observer = new MutationObserver(function (mutations) {
-        mutations.forEach(function (mutation) {
-            // Process added nodes
-            mutation.addedNodes.forEach(function (node) {
+    // Watch for dynamically added nodes (childList only — NOT attributes to avoid loops)
+    var observer = new MutationObserver(function (mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+            var added = mutations[i].addedNodes;
+            for (var j = 0; j < added.length; j++) {
+                var node = added[j];
                 if (node.nodeType === Node.ELEMENT_NODE) {
                     processElement(node);
                     scanAndRewrite(node);
                 }
-            });
-
-            // Process attribute changes on the target itself
-            if (mutation.type === 'attributes' && mutation.target.nodeType === Node.ELEMENT_NODE) {
-                processElement(mutation.target);
             }
-        });
+        }
     });
-
-    observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['href', 'src', 'data'],
-    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
 })();

@@ -12,10 +12,13 @@
 │  └─────────┘    └──────┬──────┘  │
 │                        │         │
 │  ┌─────────────────────▼──────┐  │
-│  │   azureblobstorage plugin  │  │
+│  │     cloudstorage plugin    │  │
 │  │                            │  │
+│  │  StorageClientInterface    │  │
+│  │  ├── AzureBlobClient       │  │
+│  │  └── (S3Client — Phase 2)  │  │
+│  │  StorageClientFactory      │  │
 │  │  DocumentHook              │  │
-│  │  AzureBlobClient           │  │
 │  │  DocumentTracker           │  │
 │  │  Config                    │  │
 │  └────────────┬───────────────┘  │
@@ -23,7 +26,8 @@
 └───────────────┼──────────────────┘
                 │
     ┌───────────▼───────────┐
-    │  Azure Blob Storage   │
+    │  Cloud Storage        │
+    │  Azure Blob / S3      │
     │  (or Azurite locally) │
     └───────────────────────┘
 ```
@@ -32,25 +36,25 @@
 
 | Class | Responsibility | Pattern |
 |-------|---------------|---------|
+| `StorageClientInterface` | Defines cloud storage operations contract (9 methods) | Interface |
+| `StorageClientFactory` | Creates/caches storage client by provider | Singleton Factory |
+| `AzureBlobClient` | Azure Blob Storage via Flysystem + SAS URL generation | Implementation |
 | `DocumentHook` | Handles ITEM_ADD, ITEM_UPDATE, PRE_ITEM_PURGE hooks | Static event handler |
-| `AzureBlobClient` | Azure SDK wrapper (Flysystem + SAS URL generation) | Singleton |
 | `Config` | Plugin configuration CRUD (wraps GLPI Config API) | Static utility with per-request cache |
-| `DocumentTracker` | ORM for `glpi_plugin_azureblobstorage_documenttrackers` table | CommonDBTM (GLPI ORM) |
-| `MigrateCommand` | Batch migration: local → Azure | Symfony Console Command |
-| `MigrateLocalCommand` | Reverse migration: Azure → local | Symfony Console Command |
+| `DocumentTracker` | ORM for `glpi_plugin_cloudstorage_documenttrackers` table | CommonDBTM (GLPI ORM) |
+| `MigrateCommand` | Batch migration: local → cloud | Symfony Console Command |
+| `MigrateLocalCommand` | Reverse migration: cloud → local | Symfony Console Command |
 
 ## How It Works (Without Modifying GLPI Core)
 
-This plugin does NOT modify any GLPI core files. It uses GLPI's native hook system to intercept document lifecycle events.
+This plugin does NOT modify any GLPI core files. It uses GLPI's native hook system.
 
 | Action | Does it? | Why |
 |--------|----------|-----|
 | Modify GLPI core files | **NO** | 100% hook-based |
-| Alter GLPI database tables | **NO** | Uses its own table (`glpi_plugin_azureblobstorage_documenttrackers`) |
+| Alter GLPI database tables | **NO** | Uses its own table |
 | Change login/auth flow | **NO** | Only intercepts document operations |
-| Interfere with pictures/inventories | **NO** | Only acts on managed documents (`?docid=`) |
-| Prevent normal operation if uninstalled | **NO** | Local documents keep working normally |
-| Send data to third parties | **NO** | Exclusive communication with the configured Storage Account |
+| Prevent normal operation if uninstalled | **NO** | Local documents keep working |
 
 ## Upload Flow
 
@@ -70,12 +74,12 @@ User attaches file in GLPI
 +-------------------------+
 | Plugin:                 |
 | DocumentHook::onItemAdd |
-| 1. Reads local file     |
-| 2. Uploads to Azure     |
-| 3. Tracks in DB         |
-| 4. Deletes local copy*  |
+| 1. Validates local path |
+| 2. Checks SHA1 dedup    |
+| 3. Uploads to cloud     |
+| 4. Tracks in DB         |
 +-------------------------+
-  * Only in Azure Primary mode
+  Local copy is kept (cleaned via CLI)
 ```
 
 ## Download Flow
@@ -87,7 +91,7 @@ User clicks download
 +----------------------------+
 | url-rewriter.js            |
 | Rewrites URL to            |
-| /plugins/azureblobstorage/ |
+| /plugins/cloudstorage/     |
 | front/document.send.php    |
 +----------+-----------------+
            |
@@ -96,11 +100,13 @@ User clicks download
 | Plugin endpoint:           |
 | 1. Validates permissions   |
 | 2. Queries tracker         |
-| 3a. SAS Redirect: 302 ->  |
-|     temporary Azure URL    |
+| 3a. Redirect: 302 ->      |
+|     temporary SAS URL      |
 | 3b. Proxy: stream content  |
 +----------------------------+
 ```
+
+The endpoint supports both `?docid=ID` (standard downloads) and `?file=PATH` (inline images in rich text).
 
 ## Delete Flow
 
@@ -110,57 +116,30 @@ Admin purges document
         v
 +-----------------------------+
 | Hook PRE_ITEM_PURGE         |
-| 1. Checks if in Azure      |
-| 2. Checks SHA1 dedup       |
-| 3. If last ref: deletes    |
-|    blob from Azure          |
-| 4. Removes tracker record   |
-+----------+------------------+
-           |
-           v
-+-----------------------------+
-| GLPI Core:                  |
-| cleanDBonPurge()            |
-| (tries unlink local - OK   |
-|  if already removed)        |
+| 1. Removes tracker FIRST    |
+|    (prevents race w/ dedup) |
+| 2. Checks SHA1 references   |
+| 3. If last ref: deletes     |
+|    blob from cloud           |
 +-----------------------------+
 ```
 
 ## Deduplication
 
-GLPI uses SHA1 to deduplicate files: two documents with the same content point to the same physical file. The plugin maintains this same logic:
+GLPI uses SHA1 to deduplicate files. The plugin maintains this logic:
 
-- On upload: if a blob with the same SHA1 already exists in Azure, it **verifies the blob actually exists** before skipping the upload (guards against external deletion)
+- On upload: if a blob with the same SHA1 already exists, it **verifies the blob actually exists** before skipping upload
 - On delete: only removes the blob if no other document references the same SHA1
-
-## Configuration Caching
-
-`Config::getPluginConfig()` caches decrypted configuration values in a static property for the duration of the request. This avoids repeated DB queries when multiple hooks check `isEnabled()`, `isAzurePrimary()`, etc. in the same request cycle. The cache is automatically invalidated when `Config::set()` is called.
-
-## Input Validation
-
-The configuration form handler (`front/config.form.php`) validates all POST values before saving:
-
-- `storage_mode`: must be `azure_primary` or `azure_backup`
-- `download_method`: must be `sas_redirect` or `proxy`
-- `sas_expiry_minutes`: clamped to range 1–1440
-- `enabled`: must be `0` or `1`
-
-Invalid values are silently rejected (not saved).
-
-## Uninstall Safety
-
-The plugin **refuses to uninstall** (`return false`) if there are still documents tracked in Azure. The administrator must first run `php bin/console plugins:azureblobstorage:migrate-local` to download all documents back to local storage before uninstalling.
 
 ## Database Schema
 
 ```sql
-CREATE TABLE `glpi_plugin_azureblobstorage_documenttrackers` (
+CREATE TABLE `glpi_plugin_cloudstorage_documenttrackers` (
     `id` int unsigned NOT NULL AUTO_INCREMENT,
     `documents_id` int unsigned NOT NULL DEFAULT 0,
     `filepath` varchar(255) NOT NULL DEFAULT '',
     `sha1sum` char(40) NOT NULL DEFAULT '',
-    `azure_blob_name` varchar(512) NOT NULL DEFAULT '',
+    `remote_path` varchar(512) NOT NULL DEFAULT '',
     `uploaded_at` timestamp NULL DEFAULT NULL,
     `file_size` bigint unsigned DEFAULT 0,
     PRIMARY KEY (`id`),
@@ -174,116 +153,77 @@ CREATE TABLE `glpi_plugin_azureblobstorage_documenttrackers` (
 
 | Hook | Target | Purpose |
 |------|--------|---------|
-| `Hooks::ITEM_ADD` | Document | Upload file to Azure after creation |
+| `Hooks::ITEM_ADD` | Document | Upload file to cloud after creation |
 | `Hooks::ITEM_UPDATE` | Document | Upload new version if file changed |
-| `Hooks::PRE_ITEM_PURGE` | Document | Delete blob from Azure before DB purge |
+| `Hooks::PRE_ITEM_PURGE` | Document | Delete blob before DB purge |
 | `Hooks::CONFIG_PAGE` | - | Plugin configuration page |
-| `Hooks::SECURED_CONFIGS` | - | Encrypt connection_string and account_key |
+| `Hooks::SECURED_CONFIGS` | - | Encrypt sensitive config fields |
 | `Hooks::ADD_JAVASCRIPT` | - | URL rewriter script |
 
-## URL Rewriting
+## Dependencies (Composer)
 
-The `url-rewriter.js` script dynamically derives its base path from its own `<script src>` URL, supporting GLPI installations in subdirectories (e.g., `/glpi/plugins/...`). It falls back to `/plugins/azureblobstorage/front/document.send.php` if detection fails.
-
-## CLI Commands
-
-### Migrate to Azure
-```bash
-php bin/console plugins:azureblobstorage:migrate [--batch-size=100] [--delete-local] [--dry-run]
-```
-
-### Migrate back to Local
-```bash
-php bin/console plugins:azureblobstorage:migrate-local [--batch-size=100] [--delete-azure] [--dry-run]
-```
-
-The reverse migration verifies SHA1 integrity of existing local files before removing tracker records. If a local file has a different SHA1 than expected, it downloads the correct version from Azure.
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `league/flysystem` | ^3.28 | Filesystem abstraction |
+| `azure-oss/storage-blob-flysystem` | ^1.4 | Azure Blob adapter for Flysystem |
+| `league/flysystem-aws-s3-v3` | ^3.0 | AWS S3 adapter (Phase 2) |
+| `aws/aws-sdk-php` | ^3.295 | AWS SDK (Phase 2) |
 
 ## Dependency Tree
 
 ```
 DocumentHook
   ├── Config (checks enabled, storage mode)
-  ├── AzureBlobClient (upload/delete)
+  ├── StorageClientFactory → StorageClientInterface
   ├── DocumentTracker (track/check dedup)
   └── GLPI: Document, countElementsInTable, GLPI_DOC_DIR
 
-AzureBlobClient (Singleton)
-  ├── Config (gets connection params)
+StorageClientFactory (Singleton)
+  ├── Config (gets provider + connection params)
+  └── AzureBlobClient (or S3Client)
+
+AzureBlobClient (implements StorageClientInterface)
   ├── League\Flysystem\Filesystem
-  ├── League\Flysystem\AzureBlobStorage\AzureBlobStorageAdapter
-  ├── MicrosoftAzure\Storage\Blob\BlobRestProxy
-  ├── MicrosoftAzure\Storage\Blob\BlobSharedAccessSignatureHelper
-  └── MicrosoftAzure\Storage\Common\Middlewares\RetryMiddlewareFactory
-
-DocumentTracker (extends CommonDBTM)
-  └── GLPI: CommonDBTM, countElementsInTable
-
-Config
-  └── GLPI: \Config (getConfigurationValues, setConfigurationValues)
-
-MigrateCommand / MigrateLocalCommand
-  ├── GLPI: Glpi\Console\AbstractCommand
-  ├── AzureBlobClient
-  ├── DocumentTracker
-  └── Symfony\Component\Console\*
+  ├── AzureOss\Storage\BlobFlysystem\AzureBlobStorageAdapter
+  ├── AzureOss\Storage\Blob\BlobServiceClient
+  └── AzureOss\Storage\Blob\Sas\BlobSasBuilder
 ```
 
-## Dependencies (Composer)
+## Error Handling
 
-| Package | Purpose |
-|---------|---------|
-| `league/flysystem` | Filesystem abstraction |
-| `league/flysystem-azure-blob-storage` | Azure Blob adapter for Flysystem |
-| `microsoft/azure-storage-blob` | Native Azure SDK (for SAS URL generation) |
+The plugin follows **graceful degradation** — cloud failures never block GLPI core operations.
 
-## Error Handling Strategy
+| Scenario | Behavior |
+|----------|----------|
+| Cloud unavailable during upload | File stays local, warning shown, error logged |
+| Cloud unavailable during download | Falls back to local file or shows friendly error |
+| Cloud unavailable during delete | Purge proceeds normally, orphan blob logged |
+| Invalid credentials | "Test Connection" alerts with sanitized error |
 
-The plugin follows a **graceful degradation** pattern — Azure failures never block GLPI core operations.
+### Logging (Two-Tier)
 
-### Resiliency
+| Target | Method | Content |
+|--------|--------|---------|
+| PHP error log | `trigger_error(E_USER_WARNING)` | One-line with `[CloudStorage]` prefix |
+| `files/_log/cloudstorage.log` | `Toolbox::logInFile()` | Structured detail + stack traces |
 
-| Layer | Mechanism | Details |
-|-------|-----------|---------|
-| **HTTP** | Guzzle timeouts | `connect_timeout: 5s`, `timeout: 30s` — prevents infinite hangs |
-| **Retry** | Azure SDK `RetryMiddlewareFactory` | Exponential backoff (1s → 2s → 4s), 3 retries, retries on 408/500/502/503/504 and connection errors |
-| **Fallback** | Graceful degradation | Upload fails → local kept; Download fails → serve local; Delete fails → purge proceeds |
+### Credential Sanitization
 
-### Logging
-
-All errors are logged at two levels:
-
-| Target | Method | What |
-|--------|--------|------|
-| PHP error log | `trigger_error(E_USER_WARNING)` | One-line summary with `[AzureBlobStorage]` prefix |
-| `files/_log/azureblobstorage.log` | `Toolbox::logInFile()` | Full detail with structured context and stack traces |
-
-The dedicated log file (`azureblobstorage.log`) includes: operation type (UPLOAD FAILED, DELETE FAILED, etc.), document ID, blob path, error message, and full PHP stack trace for root cause analysis.
-
-### User Notification
-
-When an upload fails during document creation or update, the admin sees a warning via `Session::addMessageAfterRedirect()` directing them to check `files/_log/azureblobstorage.log`.
-
-### Failure Matrix
-
-| Scenario | Behavior | User sees | Logged |
-|----------|----------|-----------|--------|
-| Azure unavailable during upload | File stays local, error logged | Warning message after redirect | Yes (both levels) |
-| Azure unavailable during download | Falls back to local file. If no local → "temporarily unavailable" | Error page or local file | Yes (both levels) |
-| Azure unavailable during delete | Document purge proceeds normally. Orphan blob in Azure. | Nothing (transparent) | Yes (both levels) |
-| Invalid credentials | "Test Connection" button alerts on config page | Sanitized error message | Yes |
-| Dedup verification failure | Falls through to re-upload as safety measure | Nothing (transparent) | Yes (both levels) |
+`AzureBlobClient::sanitizeErrorMessage()` redacts:
+- `AccountKey=***REDACTED***`
+- `SharedAccessSignature=***REDACTED***`
+- `sig=***REDACTED***`
+- Long base64 sequences
 
 ## Testing Strategy
 
-- PHPUnit 11.5 + Paratest (via GLPI test infrastructure)
-- Plugin tests extend `DbTestCase` (transaction rollback per test)
-- vfsStream available for filesystem mocking
+- PHPUnit 11.5 + Paratest
+- Base class: `DbTestCase` (transaction rollback)
+- vfsStream for filesystem mocking
 
-| Class | What to Test |
-|-------|-------------|
-| `DocumentHook` | Upload on add, update on file change, delete on purge, deduplication, azure_primary vs backup mode |
-| `DocumentTracker` | track(), isInAzure(), sha1ExistsInAzure(), countBySha1(), removeByDocumentId() |
-| `Config` | getPluginConfig(), isEnabled(), isAzurePrimary(), getDownloadMethod(), cache invalidation |
-| `AzureBlobClient` | upload(), download(), generateSasUrl(), testConnection(), parseBlobEndpoint() |
-| `MigrateCommand` | Batch processing, dedup handling, --dry-run, --delete-local, error recovery |
+| Class | Coverage |
+|-------|----------|
+| `DocumentHookTest` | Upload on add, update, delete, dedup, modes |
+| `DocumentTrackerTest` | track(), isTracked(), sha1Exists(), countBySha1() |
+| `ConfigTest` | isEnabled(), isCloudPrimary(), cache invalidation |
+| `AzureBlobClientTest` | upload(), download(), generateTemporaryUrl(), testConnection() |

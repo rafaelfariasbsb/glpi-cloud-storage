@@ -1,20 +1,20 @@
 <?php
 
 /**
- * Azure Blob Storage - Configuration page
+ * Cloud Storage - Configuration page
  *
  * @license GPL-3.0-or-later
  */
 
 use Glpi\Application\View\TemplateRenderer;
-use GlpiPlugin\Azureblobstorage\Config;
+use GlpiPlugin\Cloudstorage\Config;
 
 include('../../../inc/includes.php');
 
 Session::checkRight('config', UPDATE);
 
 Html::header(
-    __('Azure Blob Storage'),
+    __('Cloud Storage'),
     $_SERVER['PHP_SELF'],
     'config',
     'plugins'
@@ -23,10 +23,10 @@ Html::header(
 $config = Config::getPluginConfig();
 
 $plugin = new Plugin();
-$plugin->getFromDBbyDir('azureblobstorage');
+$plugin->getFromDBbyDir('cloudstorage');
 
 TemplateRenderer::getInstance()->display(
-    '@azureblobstorage/config.html.twig',
+    '@cloudstorage/config.html.twig',
     [
         'config'    => $config,
         'plugin'    => $plugin,

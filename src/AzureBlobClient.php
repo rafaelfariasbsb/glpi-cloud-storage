@@ -1,58 +1,55 @@
 <?php
 
-namespace GlpiPlugin\Azureblobstorage;
+namespace GlpiPlugin\Cloudstorage;
 
-use League\Flysystem\AzureBlobStorage\AzureBlobStorageAdapter;
+use AzureOss\Storage\BlobFlysystem\AzureBlobStorageAdapter;
+use AzureOss\Storage\Blob\BlobContainerClient;
+use AzureOss\Storage\Blob\BlobServiceClient;
+use AzureOss\Storage\Blob\Sas\BlobSasBuilder;
+use AzureOss\Storage\Blob\Sas\BlobSasPermissions;
+use AzureOss\Storage\Common\Sas\SasProtocol;
 use League\Flysystem\Filesystem;
 use League\Flysystem\FilesystemException;
-use MicrosoftAzure\Storage\Blob\BlobRestProxy;
-use MicrosoftAzure\Storage\Blob\BlobSharedAccessSignatureHelper;
-use MicrosoftAzure\Storage\Blob\Models\ListBlobsOptions;
-use MicrosoftAzure\Storage\Common\Internal\Resources;
-use MicrosoftAzure\Storage\Common\Middlewares\RetryMiddlewareFactory;
 
-class AzureBlobClient
+class AzureBlobClient implements StorageClientInterface
 {
-    private static ?self $instance = null;
-
     private Filesystem $filesystem;
-    private BlobRestProxy $blobClient;
-    private string $containerName;
-    private string $accountName;
-    private string $accountKey;
-    private string $blobEndpoint;
+    private BlobContainerClient $containerClient;
 
     private function __construct(
-        string $connectionString,
-        string $containerName,
-        string $accountName,
-        string $accountKey
+        BlobContainerClient $containerClient,
     ) {
-        $this->containerName = $containerName;
-        $this->accountName = $accountName;
-        $this->accountKey = $accountKey;
-        $this->blobEndpoint = self::parseBlobEndpoint($connectionString, $accountName);
+        $this->containerClient = $containerClient;
+        $adapter = new AzureBlobStorageAdapter($this->containerClient);
+        $this->filesystem = new Filesystem($adapter);
+    }
+
+    /**
+     * Create a client from the plugin config array.
+     *
+     * Called by StorageClientFactory::getInstance(). Config keys are prefixed:
+     * azure_connection_string, azure_container_name, etc.
+     */
+    public static function fromConfig(array $config): self
+    {
+        $connectionString = $config['azure_connection_string'] ?? '';
+        $containerName = $config['azure_container_name'] ?? '';
+
+        if (empty($connectionString)) {
+            throw new \RuntimeException('[CloudStorage] Azure connection string is not configured.');
+        }
+
+        if (empty($containerName)) {
+            throw new \RuntimeException('[CloudStorage] Azure container name is not configured.');
+        }
 
         try {
-            $this->blobClient = BlobRestProxy::createBlobService($connectionString, [
-                'http' => [
-                    'connect_timeout' => 5,
-                    'timeout'         => 30,
-                ],
-            ]);
-            $this->blobClient->pushMiddleware(
-                RetryMiddlewareFactory::create(
-                    RetryMiddlewareFactory::GENERAL_RETRY_TYPE,
-                    3,
-                    1000,
-                    RetryMiddlewareFactory::EXPONENTIAL_INTERVAL_ACCUMULATION,
-                    true
-                )
-            );
+            $serviceClient = BlobServiceClient::fromConnectionString($connectionString);
+            $containerClient = $serviceClient->getContainerClient($containerName);
         } catch (\Throwable $e) {
             throw new \RuntimeException(
                 sprintf(
-                    '[AzureBlobStorage] Invalid Azure credentials. Please check your Connection String in plugin settings. (Detail: %s)',
+                    '[CloudStorage] Invalid Azure credentials. Please check your Connection String in plugin settings. (Detail: %s)',
                     self::sanitizeErrorMessage($e->getMessage())
                 ),
                 0,
@@ -60,99 +57,35 @@ class AzureBlobClient
             );
         }
 
-        $adapter = new AzureBlobStorageAdapter(
-            $this->blobClient,
-            $this->containerName
-        );
-
-        $this->filesystem = new Filesystem($adapter);
+        return new self($containerClient);
     }
 
     /**
-     * Parse the Blob endpoint from a connection string.
-     *
-     * Supports standard Azure, Azurite (local emulator), Azure Government,
-     * and Azure China by reading BlobEndpoint or constructing from
-     * EndpointSuffix + AccountName.
+     * Create a client from explicit parameters (for testing connection before saving config).
      */
-    private static function parseBlobEndpoint(string $connectionString, string $accountName): string
-    {
-        $parts = [];
-        foreach (explode(';', $connectionString) as $segment) {
-            $segment = trim($segment);
-            if ($segment === '') {
-                continue;
-            }
-            $eqPos = strpos($segment, '=');
-            if ($eqPos !== false) {
-                $key = substr($segment, 0, $eqPos);
-                $value = substr($segment, $eqPos + 1);
-                $parts[$key] = $value;
-            }
-        }
-
-        // Explicit BlobEndpoint takes priority (used by Azurite and custom setups)
-        if (!empty($parts['BlobEndpoint'])) {
-            return rtrim($parts['BlobEndpoint'], '/');
-        }
-
-        // Construct from protocol + account + suffix
-        $protocol = $parts['DefaultEndpointsProtocol'] ?? 'https';
-        $account = $parts['AccountName'] ?? $accountName;
-        $suffix = $parts['EndpointSuffix'] ?? 'core.windows.net';
-
-        return sprintf('%s://%s.blob.%s', $protocol, $account, $suffix);
-    }
-
-    public static function getInstance(): self
-    {
-        if (self::$instance === null) {
-            $config = Config::getPluginConfig();
-
-            if (empty($config['connection_string'])) {
-                throw new \RuntimeException('[AzureBlobStorage] Connection string is not configured.');
-            }
-
-            if (empty($config['container_name'])) {
-                throw new \RuntimeException('[AzureBlobStorage] Container name is not configured.');
-            }
-
-            self::$instance = new self(
-                $config['connection_string'],
-                $config['container_name'],
-                $config['account_name'] ?? '',
-                $config['account_key'] ?? ''
-            );
-        }
-
-        return self::$instance;
+    public static function fromParams(
+        string $connectionString,
+        string $containerName,
+    ): self {
+        $serviceClient = BlobServiceClient::fromConnectionString($connectionString);
+        $containerClient = $serviceClient->getContainerClient($containerName);
+        return new self($containerClient);
     }
 
     /**
-     * Reset singleton (useful for testing or config changes).
+     * Upload a local file to cloud storage.
      */
-    public static function resetInstance(): void
-    {
-        self::$instance = null;
-    }
-
-    /**
-     * Upload a local file to Azure Blob Storage.
-     *
-     * @param string $blobPath   Path in the container (e.g., "PDF/ab/cdef123.PDF")
-     * @param string $localPath  Absolute path to the local file
-     */
-    public function upload(string $blobPath, string $localPath): void
+    public function upload(string $remotePath, string $localPath): void
     {
         $stream = fopen($localPath, 'rb');
         if ($stream === false) {
             throw new \RuntimeException(
-                sprintf('[AzureBlobStorage] Cannot open local file: %s', $localPath)
+                sprintf('[CloudStorage] Cannot open local file: %s', $localPath)
             );
         }
 
         try {
-            $this->filesystem->writeStream($blobPath, $stream);
+            $this->filesystem->writeStream($remotePath, $stream);
         } finally {
             if (is_resource($stream)) {
                 fclose($stream);
@@ -161,39 +94,39 @@ class AzureBlobClient
     }
 
     /**
-     * Download blob content as a string.
+     * Download file content as a string.
      */
-    public function download(string $blobPath): string
+    public function download(string $remotePath): string
     {
-        return $this->filesystem->read($blobPath);
+        return $this->filesystem->read($remotePath);
     }
 
     /**
-     * Get a readable stream for a blob (memory-safe for large files).
+     * Get a readable stream for a file (memory-safe for large files).
      *
      * @return resource
      */
-    public function readStream(string $blobPath)
+    public function readStream(string $remotePath)
     {
-        return $this->filesystem->readStream($blobPath);
+        return $this->filesystem->readStream($remotePath);
     }
 
     /**
-     * Download blob to a local file.
+     * Download file to a local path.
      */
-    public function downloadToFile(string $blobPath, string $localPath): void
+    public function downloadToFile(string $remotePath, string $localPath): void
     {
         $dir = dirname($localPath);
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
 
-        $stream = $this->filesystem->readStream($blobPath);
+        $stream = $this->filesystem->readStream($remotePath);
         $localStream = fopen($localPath, 'wb');
 
         if ($localStream === false) {
             throw new \RuntimeException(
-                sprintf('[AzureBlobStorage] Cannot write to local file: %s', $localPath)
+                sprintf('[CloudStorage] Cannot write to local file: %s', $localPath)
             );
         }
 
@@ -208,20 +141,20 @@ class AzureBlobClient
     }
 
     /**
-     * Delete a blob from Azure.
+     * Delete a file from cloud storage.
      */
-    public function delete(string $blobPath): void
+    public function delete(string $remotePath): void
     {
         try {
-            $this->filesystem->delete($blobPath);
+            $this->filesystem->delete($remotePath);
         } catch (FilesystemException $e) {
             trigger_error(
-                sprintf('[AzureBlobStorage] Failed to delete blob %s: %s', $blobPath, $e->getMessage()),
+                sprintf('[CloudStorage] Failed to delete blob %s: %s', $remotePath, $e->getMessage()),
                 E_USER_WARNING
             );
-            \Toolbox::logInFile('azureblobstorage', sprintf(
+            \Toolbox::logInFile('cloudstorage', sprintf(
                 "DELETE FAILED | blob=%s | error=%s\n%s\n",
-                $blobPath,
+                $remotePath,
                 $e->getMessage(),
                 $e->getTraceAsString()
             ));
@@ -229,20 +162,20 @@ class AzureBlobClient
     }
 
     /**
-     * Check if a blob exists.
+     * Check if a file exists in cloud storage.
      */
-    public function exists(string $blobPath): bool
+    public function exists(string $remotePath): bool
     {
         try {
-            return $this->filesystem->fileExists($blobPath);
+            return $this->filesystem->fileExists($remotePath);
         } catch (FilesystemException $e) {
             trigger_error(
-                sprintf('[AzureBlobStorage] Failed to check blob existence for %s: %s', $blobPath, $e->getMessage()),
+                sprintf('[CloudStorage] Failed to check blob existence for %s: %s', $remotePath, $e->getMessage()),
                 E_USER_WARNING
             );
-            \Toolbox::logInFile('azureblobstorage', sprintf(
+            \Toolbox::logInFile('cloudstorage', sprintf(
                 "EXISTS CHECK FAILED | blob=%s | error=%s\n%s\n",
-                $blobPath,
+                $remotePath,
                 $e->getMessage(),
                 $e->getTraceAsString()
             ));
@@ -251,60 +184,45 @@ class AzureBlobClient
     }
 
     /**
-     * Get the file size of a blob in bytes.
+     * Get the file size in bytes.
      */
-    public function fileSize(string $blobPath): int
+    public function fileSize(string $remotePath): int
     {
-        return $this->filesystem->fileSize($blobPath);
+        return $this->filesystem->fileSize($remotePath);
     }
 
     /**
-     * Generate a SAS (Shared Access Signature) URL for temporary access.
+     * Generate a temporary URL for direct browser access (Azure SAS URL).
      *
-     * @param string $blobPath       Path to the blob
-     * @param int    $expiryMinutes  How many minutes until the URL expires
-     * @return string The full SAS URL
+     * Uses HTTPS-only protocol to prevent token leakage over plaintext.
      */
-    public function generateSasUrl(string $blobPath, int $expiryMinutes = 10): string
+    public function generateTemporaryUrl(string $remotePath, int $expiryMinutes): string
     {
-        // Ensure expiry is at least 1 minute to prevent immediately-expired SAS URLs
         $expiryMinutes = max(1, $expiryMinutes);
 
-        $helper = new BlobSharedAccessSignatureHelper(
-            $this->accountName,
-            $this->accountKey
+        $blobClient = $this->containerClient->getBlobClient($remotePath);
+        $sasUri = $blobClient->generateSasUri(
+            BlobSasBuilder::new()
+                ->setPermissions(new BlobSasPermissions(read: true))
+                ->setExpiresOn(new \DateTimeImmutable("+{$expiryMinutes} minutes"))
+                ->setProtocol(SasProtocol::HttpsOnly)
         );
 
-        $expiry = new \DateTime();
-        $expiry->modify('+' . $expiryMinutes . ' minutes');
-
-        $sas = $helper->generateBlobServiceSharedAccessSignatureToken(
-            Resources::RESOURCE_TYPE_BLOB,
-            $this->containerName . '/' . $blobPath,
-            'r', // read permission
-            $expiry
-        );
-
-        return sprintf(
-            '%s/%s/%s?%s',
-            $this->blobEndpoint,
-            $this->containerName,
-            $blobPath,
-            $sas
-        );
+        return (string) $sasUri;
     }
 
     /**
      * Test the connection to Azure Blob Storage.
      *
-     * @return true|string  True on success, error message on failure
+     * @return true|string True on success, error message on failure
      */
     public function testConnection(): true|string
     {
         try {
-            $options = new ListBlobsOptions();
-            $options->setMaxResults(1);
-            $this->blobClient->listBlobs($this->containerName, $options);
+            $blobs = $this->containerClient->getBlobs();
+            foreach ($blobs as $blob) {
+                break; // iterate 1, lazy — validates access
+            }
             return true;
         } catch (\Throwable $e) {
             return sprintf('Connection failed: %s', self::sanitizeErrorMessage($e->getMessage()));
@@ -312,28 +230,29 @@ class AzureBlobClient
     }
 
     /**
-     * Create a client from explicit parameters (for testing connection before saving config).
-     */
-    public static function fromParams(
-        string $connectionString,
-        string $containerName,
-        string $accountName = '',
-        string $accountKey = ''
-    ): self {
-        return new self($connectionString, $containerName, $accountName, $accountKey);
-    }
-
-    /**
      * Sanitize error messages to avoid leaking credentials in logs.
-     * Truncates long values that may contain keys or connection strings.
      */
     private static function sanitizeErrorMessage(string $message): string
     {
-        // Replace long base64-like strings (keys, connection strings) with truncated version
-        return preg_replace(
+        // Redact specific Azure credential patterns
+        $message = preg_replace('/AccountKey=[^\s;]+/', 'AccountKey=***REDACTED***', $message) ?? $message;
+        $message = preg_replace('/SharedAccessSignature=[^\s;]+/', 'SharedAccessSignature=***REDACTED***', $message) ?? $message;
+        $message = preg_replace('/sig=[^\s&]+/', 'sig=***REDACTED***', $message) ?? $message;
+
+        // Redact values between quotes (existing pattern)
+        $message = preg_replace(
             "/['\"]([A-Za-z0-9+\/=]{40,})['\"]/",
             "'***REDACTED***'",
             $message
         ) ?? $message;
+
+        // Redact any loose long base64 sequences (catches unquoted keys)
+        $message = preg_replace(
+            '/(?<![A-Za-z0-9+\/=])([A-Za-z0-9+\/]{40,}={0,2})(?![A-Za-z0-9+\/=])/',
+            '***REDACTED***',
+            $message
+        ) ?? $message;
+
+        return $message;
     }
 }

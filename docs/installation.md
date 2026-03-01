@@ -59,44 +59,23 @@ az storage container create \
 
 #### 3. Configure Access Permissions (RBAC)
 
-The identity accessing the storage account needs the correct RBAC role. The required role depends on the authentication method:
-
 | RBAC Role | Sufficient? | Why |
 |-----------|-------------|-----|
-| **Storage Blob Data Contributor** | **Yes (recommended)** | Read, write, and delete blobs — exactly what the plugin needs |
-| Storage Blob Data Reader | No | Read-only — plugin also needs write and delete |
-| Storage Account Contributor | No | Management plane only — does not grant data plane access |
-| Owner / Contributor | No | Management plane — does not include blob data operations |
+| **Storage Blob Data Contributor** | **Yes (recommended)** | Read, write, and delete blobs |
+| Storage Blob Data Reader | No | Read-only |
+| Storage Account Contributor | No | Management plane only |
 
-**For Access Key authentication** (current default), RBAC roles are not required for the plugin to function — the access key grants full data plane access. However, assigning RBAC roles is still recommended as preparation for future Managed Identity support and for other tools accessing the same storage.
-
-**For Service Principals** (Azure AD app registrations):
-
-```bash
-az role assignment create \
-  --role "Storage Blob Data Contributor" \
-  --assignee <app-id-or-object-id> \
-  --scope /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<account>
-```
-
-**For future Managed Identity support** (see [Security](security.md)):
-
-```bash
-az role assignment create \
-  --role "Storage Blob Data Contributor" \
-  --assignee <managed-identity-principal-id> \
-  --scope /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<account>
-```
+**For Access Key authentication** (current default), RBAC roles are not required — the access key grants full data plane access.
 
 #### 4. Get Your Credentials
 
 1. Go to **Storage Account > Security + networking > Access keys**
 2. Copy:
-   - **Storage account name** (e.g., `glpidocsstorage`)
+   - **Storage account name**
    - **Key** (either key1 or key2)
    - **Connection string** (starts with `DefaultEndpointsProtocol=https;AccountName=...`)
 
-> These will be entered in the GLPI plugin configuration page. They are stored encrypted in the database via GLPI's `SECURED_CONFIGS` mechanism (sodium encryption).
+> These are stored encrypted in the database via GLPI's `SECURED_CONFIGS` mechanism (sodium encryption).
 
 #### 5. Recommended Security Settings
 
@@ -107,7 +86,6 @@ az role assignment create \
 | **Soft delete** | Storage Account > Data protection | Enable for blobs (7-30 days) |
 | **Versioning** | Storage Account > Data protection | Enable for point-in-time recovery |
 | **Firewall** | Storage Account > Networking | Restrict to GLPI server IPs if possible |
-| **Private endpoint** | Storage Account > Networking | Use if GLPI runs in Azure VNet |
 | **Key rotation** | Security + networking > Access keys | Rotate periodically (every 90 days) |
 
 ---
@@ -118,43 +96,53 @@ az role assignment create \
 
 ```bash
 # 1. Clone or copy the plugin to GLPI plugins directory
-git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git /path/to/glpi/plugins/azureblobstorage
-# Alternative: symlink (ideal for development)
-# ln -s /path/to/glpi-cloud-storage /path/to/glpi/plugins/azureblobstorage
+git clone https://github.com/rafaelfariasbsb/glpi-cloud-storage.git /path/to/glpi/plugins/cloudstorage
 
 # 2. Install PHP dependencies
-cd /path/to/glpi/plugins/azureblobstorage
+cd /path/to/glpi/plugins/cloudstorage
 composer install --no-dev
 
 # 3. Install the plugin via GLPI console
-php /path/to/glpi/bin/console plugin:install azureblobstorage -u glpi
+php /path/to/glpi/bin/console plugin:install cloudstorage --username=glpi
 
-# 4. Enable the plugin
-php /path/to/glpi/bin/console plugin:enable azureblobstorage
+# 4. Activate the plugin
+php /path/to/glpi/bin/console plugin:activate cloudstorage
 ```
 
-5. Go to **Setup > Plugins > Azure Blob Storage** and configure your Azure credentials (see [Configuration Guide](configuration.md)).
+5. Go to **Setup > Plugins > Cloud Storage** and configure your credentials (see [Configuration Guide](configuration.md)).
+6. Enable the plugin using the toggle on the configuration page.
 
 ### Via Web Interface
 
-1. Copy/clone the plugin to `plugins/azureblobstorage`
+1. Copy/clone the plugin to `plugins/cloudstorage`
 2. Run `composer install --no-dev` in the plugin directory
 3. Go to **Setup > Plugins**
-4. Find "Azure Blob Storage" in the list
+4. Find "Cloud Storage" in the list
 5. Click **Install** then **Enable**
-6. Configure credentials in **Setup > Plugins > Azure Blob Storage**
+6. Configure credentials in **Setup > Plugins > Cloud Storage**
+
+## Upgrading from v1.x (azureblobstorage)
+
+The plugin was renamed from `azureblobstorage` to `cloudstorage` in v2.0.0. The install hook automatically migrates:
+
+- Table renamed: `glpi_plugin_azureblobstorage_documenttrackers` → `glpi_plugin_cloudstorage_documenttrackers`
+- Column renamed: `azure_blob_name` → `remote_path`
+- Config keys migrated: `connection_string` → `azure_connection_string`, etc.
+- Enum values updated: `azure_primary` → `cloud_primary`, `sas_redirect` → `redirect`
 
 ## Uninstallation
 
-> **Warning**: If using "Azure Primary" mode, migrate documents back to local BEFORE uninstalling:
+> **Warning**: If using "Cloud Primary" mode, migrate documents back to local BEFORE uninstalling:
 > ```bash
-> php bin/console plugins:azureblobstorage:migrate-local
+> php bin/console plugins:cloudstorage:migrate-local
 > ```
 
 ```bash
-# Disable the plugin
-php bin/console plugin:disable azureblobstorage
+# Deactivate the plugin
+php bin/console plugin:deactivate cloudstorage
 
 # Uninstall (removes tracker table and configuration)
-php bin/console plugin:uninstall azureblobstorage
+php bin/console plugin:uninstall cloudstorage
 ```
+
+The plugin **refuses to uninstall** if documents are still tracked in cloud storage.

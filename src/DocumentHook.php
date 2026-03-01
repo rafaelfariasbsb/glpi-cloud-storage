@@ -1,21 +1,21 @@
 <?php
 
-namespace GlpiPlugin\Azureblobstorage;
+namespace GlpiPlugin\Cloudstorage;
 
 use Document;
 
 class DocumentHook
 {
-    /** @var string[] Local files to delete at the end of the request. */
-    private static array $pendingDeletes = [];
-
     /**
      * Hook called after a Document is added to the database.
-     * Uploads the file to Azure Blob Storage.
+     * Uploads the file to cloud storage.
      *
-     * Local file deletion is deferred to the end of the request via
-     * register_shutdown_function() to avoid breaking GLPI's post-processing
-     * (e.g. convertTagToImage needs the local file after Document::add).
+     * Note: Local files are NOT deleted here, even in cloud_primary mode.
+     * Automatic deletion during the HTTP request causes a race condition:
+     * the browser tries to load inline images via the core document.send.php
+     * before the JS url-rewriter can redirect to the plugin endpoint.
+     * Use the CLI command `plugins:cloudstorage:cleanup-local` to remove
+     * local copies of files that are confirmed uploaded to cloud storage.
      */
     public static function onItemAdd(Document $item): void
     {
@@ -29,24 +29,26 @@ class DocumentHook
         }
 
         $sha1sum = $item->fields['sha1sum'] ?? $item->input['sha1sum'] ?? '';
-        $localPath = GLPI_DOC_DIR . '/' . $filepath;
+
+        try {
+            $localPath = Config::validateLocalPath($filepath);
+        } catch (\RuntimeException $e) {
+            \Toolbox::logInFile('cloudstorage', $e->getMessage() . "\n");
+            return;
+        }
 
         if (!file_exists($localPath)) {
             return; // No local file to upload
         }
 
-        // Deduplication: if a blob with same SHA1 already exists in Azure, skip upload
-        if (!empty($sha1sum) && DocumentTracker::sha1ExistsInAzure($sha1sum)) {
+        // Deduplication: if a blob with same SHA1 already exists, skip upload
+        if (!empty($sha1sum) && DocumentTracker::sha1Exists($sha1sum)) {
             // Verify the blob actually exists (may have been deleted externally)
             try {
-                $client = AzureBlobClient::getInstance();
+                $client = StorageClientFactory::getInstance();
                 if ($client->exists($filepath)) {
                     $fileSize = filesize($localPath) ?: 0;
                     DocumentTracker::track($item->getID(), $filepath, $sha1sum, $fileSize);
-
-                    if (Config::isAzurePrimary()) {
-                        self::scheduleDeletion($localPath);
-                    }
                     return;
                 }
                 // Blob missing in Azure — fall through to re-upload
@@ -54,14 +56,14 @@ class DocumentHook
                 // Cannot verify — fall through to upload as safety measure
                 trigger_error(
                     sprintf(
-                        '[AzureBlobStorage] Dedup verification failed for document %d (%s): %s',
+                        '[CloudStorage] Dedup verification failed for document %d (%s): %s',
                         $item->getID(),
                         $filepath,
                         $e->getMessage()
                     ),
                     E_USER_WARNING
                 );
-                \Toolbox::logInFile('azureblobstorage', sprintf(
+                \Toolbox::logInFile('cloudstorage', sprintf(
                     "DEDUP CHECK FAILED | doc_id=%d | filepath=%s | error=%s\n%s\n",
                     $item->getID(),
                     $filepath,
@@ -72,31 +74,27 @@ class DocumentHook
         }
 
         try {
-            $client = AzureBlobClient::getInstance();
+            $client = StorageClientFactory::getInstance();
 
-            // Upload to Azure
+            // Upload to cloud storage
             $client->upload($filepath, $localPath);
 
             // Track in database
             $fileSize = filesize($localPath) ?: 0;
             DocumentTracker::track($item->getID(), $filepath, $sha1sum, $fileSize);
 
-            // In "Azure Primary" mode, defer local deletion to end of request
-            if (Config::isAzurePrimary()) {
-                self::scheduleDeletion($localPath);
-            }
         } catch (\Throwable $e) {
             // Log error but do NOT prevent document creation
             trigger_error(
                 sprintf(
-                    '[AzureBlobStorage] Upload failed for document %d (%s): %s',
+                    '[CloudStorage] Upload failed for document %d (%s): %s',
                     $item->getID(),
                     $filepath,
                     $e->getMessage()
                 ),
                 E_USER_WARNING
             );
-            \Toolbox::logInFile('azureblobstorage', sprintf(
+            \Toolbox::logInFile('cloudstorage', sprintf(
                 "UPLOAD FAILED | doc_id=%d | filepath=%s | error=%s\n%s\n",
                 $item->getID(),
                 $filepath,
@@ -105,7 +103,7 @@ class DocumentHook
             ));
             \Session::addMessageAfterRedirect(
                 sprintf(
-                    __('[Azure Blob Storage] Upload to cloud storage failed for document "%s". The local copy was kept. Check files/_log/azureblobstorage.log for details.'),
+                    __('[Cloud Storage] Upload to cloud storage failed for document "%s". The local copy was kept. Check files/_log/cloudstorage.log for details.'),
                     $item->fields['filename'] ?? $filepath
                 ),
                 false,
@@ -116,7 +114,7 @@ class DocumentHook
 
     /**
      * Hook called after a Document is updated.
-     * If the file changed, upload the new version to Azure.
+     * If the file changed, upload the new version to cloud storage.
      */
     public static function onItemUpdate(Document $item): void
     {
@@ -137,18 +135,24 @@ class DocumentHook
         }
 
         $newSha1sum = $item->fields['sha1sum'] ?? '';
-        $localPath = GLPI_DOC_DIR . '/' . $newFilepath;
+
+        try {
+            $localPath = Config::validateLocalPath($newFilepath);
+        } catch (\RuntimeException $e) {
+            \Toolbox::logInFile('cloudstorage', $e->getMessage() . "\n");
+            return;
+        }
 
         if (!file_exists($localPath)) {
             return;
         }
 
         try {
-            $client = AzureBlobClient::getInstance();
+            $client = StorageClientFactory::getInstance();
 
-            // Upload new file (if not already in Azure via deduplication)
+            // Upload new file (if not already in cloud via deduplication)
             $needsUpload = true;
-            if (!empty($newSha1sum) && DocumentTracker::sha1ExistsInAzure($newSha1sum)) {
+            if (!empty($newSha1sum) && DocumentTracker::sha1Exists($newSha1sum)) {
                 // Verify the blob actually exists before skipping upload
                 $needsUpload = !$client->exists($newFilepath);
             }
@@ -161,11 +165,6 @@ class DocumentHook
             $fileSize = filesize($localPath) ?: 0;
             DocumentTracker::track($item->getID(), $newFilepath, $newSha1sum, $fileSize);
 
-            // Remove local copy if Azure Primary (deferred to end of request)
-            if (Config::isAzurePrimary()) {
-                self::scheduleDeletion($localPath);
-            }
-
             // Clean up old Azure blob if no longer referenced
             if (!empty($oldFilepath)) {
                 $oldSha1sum = $item->oldvalues['sha1sum'] ?? '';
@@ -174,13 +173,13 @@ class DocumentHook
         } catch (\Throwable $e) {
             trigger_error(
                 sprintf(
-                    '[AzureBlobStorage] Update upload failed for document %d: %s',
+                    '[CloudStorage] Update upload failed for document %d: %s',
                     $item->getID(),
                     $e->getMessage()
                 ),
                 E_USER_WARNING
             );
-            \Toolbox::logInFile('azureblobstorage', sprintf(
+            \Toolbox::logInFile('cloudstorage', sprintf(
                 "UPDATE UPLOAD FAILED | doc_id=%d | error=%s\n%s\n",
                 $item->getID(),
                 $e->getMessage(),
@@ -188,7 +187,7 @@ class DocumentHook
             ));
             \Session::addMessageAfterRedirect(
                 sprintf(
-                    __('[Azure Blob Storage] Upload to cloud storage failed for document "%s". The local copy was kept. Check files/_log/azureblobstorage.log for details.'),
+                    __('[Cloud Storage] Upload to cloud storage failed for document "%s". The local copy was kept. Check files/_log/cloudstorage.log for details.'),
                     $item->fields['filename'] ?? $newFilepath
                 ),
                 false,
@@ -219,7 +218,7 @@ class DocumentHook
         }
 
         $sha1sum = $tracking['sha1sum'];
-        $blobPath = $tracking['azure_blob_name'];
+        $blobPath = $tracking['remote_path'];
 
         // Remove tracker FIRST to prevent race conditions with onItemAdd deduplication
         DocumentTracker::removeByDocumentId($documentId);
@@ -235,20 +234,20 @@ class DocumentHook
             $trackerCount = DocumentTracker::countBySha1($sha1sum);
 
             if ($docCount <= 1 && $trackerCount === 0) {
-                $client = AzureBlobClient::getInstance();
+                $client = StorageClientFactory::getInstance();
                 $client->delete($blobPath);
             }
         } catch (\Throwable $e) {
             // Log but don't prevent purge
             trigger_error(
                 sprintf(
-                    '[AzureBlobStorage] Failed to delete blob for document %d: %s',
+                    '[CloudStorage] Failed to delete blob for document %d: %s',
                     $documentId,
                     $e->getMessage()
                 ),
                 E_USER_WARNING
             );
-            \Toolbox::logInFile('azureblobstorage', sprintf(
+            \Toolbox::logInFile('cloudstorage', sprintf(
                 "PURGE DELETE FAILED | doc_id=%d | blob=%s | error=%s\n%s\n",
                 $documentId,
                 $blobPath,
@@ -256,46 +255,6 @@ class DocumentHook
                 $e->getTraceAsString()
             ));
         }
-    }
-
-    /**
-     * Schedule a local file for deletion at the end of the request.
-     *
-     * GLPI's post-processing (e.g. convertTagToImage, thumbnail generation)
-     * may still need the local file after Document hooks fire. Deferring
-     * deletion to shutdown ensures all processing is complete.
-     */
-    private static function scheduleDeletion(string $localPath): void
-    {
-        self::$pendingDeletes[] = $localPath;
-
-        // Always register — register_shutdown_function is per-request,
-        // safe to call multiple times (each call adds a new handler).
-        // We use count check to register only once per request.
-        if (count(self::$pendingDeletes) === 1) {
-            register_shutdown_function([self::class, 'processPendingDeletes']);
-        }
-    }
-
-    /**
-     * Delete all scheduled local files. Called at PHP shutdown.
-     */
-    public static function processPendingDeletes(): void
-    {
-        foreach (self::$pendingDeletes as $localPath) {
-            if (!file_exists($localPath)) {
-                continue;
-            }
-            if (!unlink($localPath)) {
-                trigger_error(
-                    sprintf('[AzureBlobStorage] Failed to delete local file: %s', $localPath),
-                    E_USER_WARNING
-                );
-            } else {
-                self::cleanEmptyDirs(dirname($localPath));
-            }
-        }
-        self::$pendingDeletes = [];
     }
 
     /**
@@ -316,14 +275,14 @@ class DocumentHook
 
         if ($docCount <= 0 && $trackerCount <= 0) {
             try {
-                $client = AzureBlobClient::getInstance();
+                $client = StorageClientFactory::getInstance();
                 $client->delete($filepath);
             } catch (\Throwable $e) {
                 trigger_error(
-                    sprintf('[AzureBlobStorage] Orphan cleanup failed for %s: %s', $filepath, $e->getMessage()),
+                    sprintf('[CloudStorage] Orphan cleanup failed for %s: %s', $filepath, $e->getMessage()),
                     E_USER_WARNING
                 );
-                \Toolbox::logInFile('azureblobstorage', sprintf(
+                \Toolbox::logInFile('cloudstorage', sprintf(
                     "ORPHAN CLEANUP FAILED | filepath=%s | error=%s\n%s\n",
                     $filepath,
                     $e->getMessage(),
@@ -343,7 +302,7 @@ class DocumentHook
             return;
         }
 
-        while ($dir !== $docDir && is_dir($dir)) {
+        while (rtrim($dir, '/') !== rtrim($docDir, '/') && is_dir($dir)) {
             $files = scandir($dir);
             if ($files === false || count($files) > 2) { // . and ..
                 break;

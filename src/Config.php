@@ -1,26 +1,34 @@
 <?php
 
-namespace GlpiPlugin\Azureblobstorage;
+namespace GlpiPlugin\Cloudstorage;
 
 class Config
 {
-    private const CONTEXT = 'plugin:azureblobstorage';
+    private const CONTEXT = 'plugin:cloudstorage';
 
     private const CONFIG_KEYS = [
-        'connection_string',
-        'account_name',
-        'account_key',
-        'container_name',
+        'provider',
+        'azure_connection_string',
+        'azure_account_name',
+        'azure_account_key',
+        'azure_container_name',
+        's3_access_key_id',
+        's3_secret_access_key',
+        's3_region',
+        's3_bucket_name',
+        's3_endpoint',
         'storage_mode',
         'download_method',
-        'sas_expiry_minutes',
+        'url_expiry_minutes',
         'enabled',
     ];
 
     /** Fields encrypted via GLPI's SECURED_CONFIGS mechanism. */
     private const SECURED_FIELDS = [
-        'connection_string',
-        'account_key',
+        'azure_connection_string',
+        'azure_account_key',
+        's3_access_key_id',
+        's3_secret_access_key',
     ];
 
     /** @var array<string, string>|null Per-request cache of decrypted config. */
@@ -51,6 +59,14 @@ class Config
     }
 
     /**
+     * Get the configured storage provider (azure or s3).
+     */
+    public static function getProvider(): string
+    {
+        return self::get('provider', 'azure');
+    }
+
+    /**
      * Decrypt fields that are stored encrypted via SECURED_CONFIGS.
      *
      * @param array<string, string> $config
@@ -67,16 +83,15 @@ class Config
                     $config[$field] = $decrypted !== '' ? $decrypted : $config[$field];
                 } catch (\Throwable $e) {
                     trigger_error(
-                        sprintf('[AzureBlobStorage] Failed to decrypt config field "%s": %s', $field, $e->getMessage()),
+                        sprintf('[CloudStorage] Failed to decrypt config field "%s": %s', $field, $e->getMessage()),
                         E_USER_WARNING
                     );
-                    \Toolbox::logInFile('azureblobstorage', sprintf(
+                    \Toolbox::logInFile('cloudstorage', sprintf(
                         "DECRYPT FAILED | field=%s | error=%s\n%s\n",
                         $field,
                         $e->getMessage(),
                         $e->getTraceAsString()
                     ));
-                    // Keep the raw value so the caller can still attempt to use it
                 }
             }
         }
@@ -92,7 +107,7 @@ class Config
     {
         \Config::setConfigurationValues(self::CONTEXT, $values);
         self::$cache = null;
-        AzureBlobClient::resetInstance();
+        StorageClientFactory::resetInstance();
     }
 
     /**
@@ -104,58 +119,96 @@ class Config
     }
 
     /**
-     * Get the storage mode (azure_primary or azure_backup).
+     * Get the storage mode (cloud_primary or cloud_backup).
      */
     public static function getStorageMode(): string
     {
-        return self::get('storage_mode', 'azure_primary');
+        return self::get('storage_mode', 'cloud_primary');
     }
 
     /**
-     * Check if storage mode is "Azure Primary" (delete local after upload).
+     * Check if storage mode is "Cloud Primary" (delete local after upload).
      */
-    public static function isAzurePrimary(): bool
+    public static function isCloudPrimary(): bool
     {
-        return self::getStorageMode() === 'azure_primary';
+        return self::getStorageMode() === 'cloud_primary';
     }
 
     /**
-     * Get the download method (sas_redirect or proxy).
+     * Get the download method (redirect or proxy).
      */
     public static function getDownloadMethod(): string
     {
-        return self::get('download_method', 'sas_redirect');
+        return self::get('download_method', 'redirect');
     }
 
     /**
-     * Get SAS URL expiry in minutes.
+     * Get temporary URL expiry in minutes.
      */
-    public static function getSasExpiryMinutes(): int
+    public static function getUrlExpiryMinutes(): int
     {
-        return (int) self::get('sas_expiry_minutes', '10');
+        return (int) self::get('url_expiry_minutes', '5');
     }
 
     /**
-     * Test the Azure connection using current (or provided) config.
+     * Validate that a filepath resolves to a location inside GLPI_DOC_DIR.
+     *
+     * Prevents path traversal attacks if filepath data in the DB is compromised.
+     *
+     * @param string $filepath Relative filepath (e.g., "PDF/ab/cdef123.PDF")
+     * @return string Absolute local path
+     * @throws \RuntimeException If the path escapes GLPI_DOC_DIR
+     */
+    public static function validateLocalPath(string $filepath): string
+    {
+        $localPath = GLPI_DOC_DIR . '/' . $filepath;
+        $realDocDir = realpath(GLPI_DOC_DIR);
+
+        if ($realDocDir === false) {
+            throw new \RuntimeException('[CloudStorage] GLPI_DOC_DIR does not exist.');
+        }
+
+        // For files that already exist, check the real path directly
+        if (file_exists($localPath)) {
+            $realPath = realpath($localPath);
+            if ($realPath === false || !str_starts_with($realPath, $realDocDir . '/')) {
+                throw new \RuntimeException(
+                    sprintf('[CloudStorage] Path traversal detected: %s', $filepath)
+                );
+            }
+            return $realPath;
+        }
+
+        // For files that don't exist yet, validate the parent directory
+        $parentDir = dirname($localPath);
+        if (is_dir($parentDir)) {
+            $realParent = realpath($parentDir);
+            if ($realParent === false || !str_starts_with($realParent . '/', $realDocDir . '/')) {
+                throw new \RuntimeException(
+                    sprintf('[CloudStorage] Path traversal detected: %s', $filepath)
+                );
+            }
+        } else {
+            // Parent doesn't exist yet — validate that the filepath has no traversal sequences
+            if (str_contains($filepath, '..') || str_starts_with($filepath, '/')) {
+                throw new \RuntimeException(
+                    sprintf('[CloudStorage] Path traversal detected: %s', $filepath)
+                );
+            }
+        }
+
+        return $localPath;
+    }
+
+    /**
+     * Test the cloud storage connection using current (or provided) config.
      *
      * @return true|string True on success, error message string on failure.
      */
-    public static function testConnection(
-        ?string $connectionString = null,
-        ?string $containerName = null,
-        ?string $accountName = null,
-        ?string $accountKey = null
-    ): true|string {
+    public static function testConnection(): true|string
+    {
         try {
-            $config = self::getPluginConfig();
-
-            $client = AzureBlobClient::fromParams(
-                $connectionString ?? $config['connection_string'] ?? '',
-                $containerName ?? $config['container_name'] ?? '',
-                $accountName ?? $config['account_name'] ?? '',
-                $accountKey ?? $config['account_key'] ?? ''
-            );
-
+            $client = StorageClientFactory::getInstance();
             return $client->testConnection();
         } catch (\Throwable $e) {
             return $e->getMessage();

@@ -1,6 +1,13 @@
 # Configuration Guide
 
-After installation, go to **Setup > Plugins > Azure Blob Storage**.
+After installation, go to **Setup > Plugins > Cloud Storage**.
+
+## Provider
+
+| Provider | Status | Description |
+|----------|--------|-------------|
+| **Azure Blob Storage** | Available | Microsoft Azure cloud storage |
+| **AWS S3** | Planned (Phase 2) | Amazon S3 / S3-compatible storage |
 
 ## Azure Credentials
 
@@ -11,7 +18,7 @@ After installation, go to **Setup > Plugins > Azure Blob Storage**.
 | **Account Key** | Account access key (encrypted in DB) | `AbCdEf123...==` |
 | **Container Name** | Blob container name for documents | `glpi-documents` |
 
-> Credentials `connection_string` and `account_key` are stored encrypted in the GLPI database using the native `SECURED_CONFIGS` mechanism.
+> Credentials `azure_connection_string` and `azure_account_key` are stored encrypted in the GLPI database using the native `SECURED_CONFIGS` mechanism.
 
 ### How to Get Azure Credentials
 
@@ -24,26 +31,28 @@ After installation, go to **Setup > Plugins > Azure Blob Storage**.
 
 | Mode | Behavior | Recommended Use |
 |------|----------|-----------------|
-| **Azure Primary** (default) | File is uploaded to Azure and local copy is deleted | Production - saves disk space |
-| **Azure Backup** | File is kept both locally and in Azure | Transition - full redundancy |
+| **Cloud Primary** (default) | File is uploaded to cloud; local copy can be cleaned up via CLI | Production - saves disk space |
+| **Cloud Backup** | File is kept both locally and in cloud | Transition - full redundancy |
+
+> **Note**: In Cloud Primary mode, local files are NOT deleted automatically during the HTTP request. Use the `cleanup-local` CLI command to remove local copies of confirmed cloud-stored files.
 
 ## Download Method
 
 | Method | Behavior | Advantages |
 |--------|----------|------------|
-| **SAS Redirect** (default) | Generates a temporary signed URL and redirects the browser directly to Azure | Fast, no GLPI overhead, ideal for large files |
-| **Proxy** | GLPI downloads from Azure and relays to the user | Internal URLs stay hidden, more control |
+| **Redirect** (default) | Generates a temporary signed URL and redirects the browser directly to cloud storage | Fast, no GLPI overhead, ideal for large files |
+| **Proxy** | GLPI downloads from cloud and streams to the user | Internal URLs stay hidden, more control |
 
 ## Additional Settings
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| **SAS Expiry (minutes)** | 10 | Validity period for generated SAS URLs |
-| **Enabled** | Yes | Master switch - disabling reverts GLPI to local behavior |
+| **URL Expiry (minutes)** | 5 | Validity period for generated temporary URLs (SAS) |
+| **Enabled** | No | Master switch - must be enabled for hooks to work |
 
 ## Test Connection
 
 Use the **Test Connection** button on the configuration page to validate:
 - Credentials are correct
 - Container exists and is accessible
-- Read/write permissions are OK
+- Read permissions are OK

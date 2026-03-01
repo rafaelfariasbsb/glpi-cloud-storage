@@ -1,9 +1,9 @@
 <?php
 
 /**
- * Azure Blob Storage - Document download endpoint
+ * Cloud Storage - Document download endpoint
  *
- * Replaces the core /front/document.send.php for documents stored in Azure.
+ * Replaces the core /front/document.send.php for documents stored in cloud storage.
  * Replicates the same access control checks as the core endpoint.
  *
  * @license GPL-3.0-or-later
@@ -12,26 +12,41 @@
 use Glpi\Exception\Http\AccessDeniedHttpException;
 use Glpi\Exception\Http\BadRequestHttpException;
 use Glpi\Exception\Http\NotFoundHttpException;
-use GlpiPlugin\Azureblobstorage\AzureBlobClient;
-use GlpiPlugin\Azureblobstorage\Config;
-use GlpiPlugin\Azureblobstorage\DocumentTracker;
+use GlpiPlugin\Cloudstorage\Config;
+use GlpiPlugin\Cloudstorage\DocumentTracker;
+use GlpiPlugin\Cloudstorage\StorageClientFactory;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 include('../../../inc/includes.php');
 
-if (!isset($_GET['docid'])) {
+$doc = new Document();
+$docId = null;
+
+if (isset($_GET['docid'])) {
+    // Standard document download by ID
+    $docId = (int) $_GET['docid'];
+    if (!$doc->getFromDB($docId)) {
+        $exception = new NotFoundHttpException();
+        $exception->setMessageToDisplay(__('Unknown file'));
+        throw $exception;
+    }
+} elseif (isset($_GET['file'])) {
+    // Inline image/file by filepath (used by rich text editor)
+    $filepath = $_GET['file'];
+    // Look up document by filepath
+    $docs = $doc->find(['filepath' => $filepath], [], 1);
+    if (empty($docs)) {
+        $exception = new NotFoundHttpException();
+        $exception->setMessageToDisplay(__('Unknown file'));
+        throw $exception;
+    }
+    $docData = reset($docs);
+    $docId = (int) $docData['id'];
+    $doc->getFromDB($docId);
+} else {
     $exception = new BadRequestHttpException();
     $exception->setMessageToDisplay(__('Missing document ID'));
-    throw $exception;
-}
-
-$docId = (int) $_GET['docid'];
-$doc = new Document();
-
-if (!$doc->getFromDB($docId)) {
-    $exception = new NotFoundHttpException();
-    $exception->setMessageToDisplay(__('Unknown file'));
     throw $exception;
 }
 
@@ -42,7 +57,7 @@ if (!$doc->canViewFile($_GET)) {
     throw $exception;
 }
 
-// Check if document is tracked in Azure
+// Check if document is tracked in cloud storage
 $tracking = DocumentTracker::getByDocumentId($docId);
 
 if ($tracking === null) {
@@ -56,26 +71,28 @@ if ($tracking === null) {
     }
 
     $exception = new NotFoundHttpException();
-    $exception->setMessageToDisplay(sprintf(__('File %s not found.'), $doc->fields['filename']));
+    $exception->setMessageToDisplay(htmlescape(sprintf(__('File %s not found.'), $doc->fields['filename'])));
     throw $exception;
 }
 
-// Document is in Azure - serve it
-$blobPath = $tracking['azure_blob_name'];
+// Document is in cloud storage - serve it
+$blobPath = $tracking['remote_path'];
 $downloadMethod = Config::getDownloadMethod();
 
 try {
-    if ($downloadMethod === 'sas_redirect') {
-        // Generate SAS URL and redirect
-        $client = AzureBlobClient::getInstance();
-        $sasUrl = $client->generateSasUrl($blobPath, Config::getSasExpiryMinutes());
+    if ($downloadMethod === 'redirect') {
+        // Generate temporary URL and redirect
+        $client = StorageClientFactory::getInstance();
+        $sasUrl = $client->generateTemporaryUrl($blobPath, Config::getUrlExpiryMinutes());
 
-        (new RedirectResponse($sasUrl, 302))->send();
+        $response = new RedirectResponse($sasUrl, 302);
+        $response->headers->set('Referrer-Policy', 'no-referrer');
+        $response->send();
         exit;
     }
 
     // Proxy mode: stream content through GLPI (memory-safe for large files)
-    $client = AzureBlobClient::getInstance();
+    $client = StorageClientFactory::getInstance();
 
     $filename = $doc->fields['filename'] ?? basename($blobPath);
     $mime = $doc->fields['mime'] ?? 'application/octet-stream';
@@ -109,17 +126,20 @@ try {
             $safeFilename,
             rawurlencode($filename)
         ),
-        'Cache-Control'       => 'private, must-revalidate',
+        'Cache-Control'            => 'private, must-revalidate',
+        'X-Content-Type-Options'   => 'nosniff',
+        'X-Frame-Options'          => 'DENY',
+        'Referrer-Policy'          => 'no-referrer',
     ]);
 
     $response->send();
     exit;
 } catch (\Throwable $e) {
     trigger_error(
-        sprintf('[AzureBlobStorage] Download failed for document %d: %s', $docId, $e->getMessage()),
+        sprintf('[CloudStorage] Download failed for document %d: %s', $docId, $e->getMessage()),
         E_USER_WARNING
     );
-    \Toolbox::logInFile('azureblobstorage', sprintf(
+    \Toolbox::logInFile('cloudstorage', sprintf(
         "DOWNLOAD FAILED | doc_id=%d | blob=%s | method=%s | error=%s\n%s\n",
         $docId,
         $blobPath,

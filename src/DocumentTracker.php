@@ -1,16 +1,16 @@
 <?php
 
-namespace GlpiPlugin\Azureblobstorage;
+namespace GlpiPlugin\Cloudstorage;
 
 use CommonDBTM;
 
 class DocumentTracker extends CommonDBTM
 {
-    public static $table = 'glpi_plugin_azureblobstorage_documenttrackers';
+    public static $table = 'glpi_plugin_cloudstorage_documenttrackers';
     public static $rightname = 'config';
 
     /**
-     * Track a document as stored in Azure.
+     * Track a document as stored in cloud storage.
      */
     public static function track(int $documentId, string $filepath, string $sha1sum, int $fileSize = 0): bool
     {
@@ -26,16 +26,16 @@ class DocumentTracker extends CommonDBTM
             'documents_id'   => $documentId,
             'filepath'       => $filepath,
             'sha1sum'        => $sha1sum,
-            'azure_blob_name' => $filepath,
+            'remote_path'    => $filepath,
             'uploaded_at'    => date('Y-m-d H:i:s'),
             'file_size'      => $fileSize,
         ]);
     }
 
     /**
-     * Check if a document is stored in Azure.
+     * Check if a document is tracked in cloud storage.
      */
-    public static function isInAzure(int $documentId): bool
+    public static function isTracked(int $documentId): bool
     {
         return countElementsInTable(self::$table, ['documents_id' => $documentId]) > 0;
     }
@@ -60,7 +60,7 @@ class DocumentTracker extends CommonDBTM
     /**
      * Check if a SHA1 hash already exists in the tracker (for deduplication).
      */
-    public static function sha1ExistsInAzure(string $sha1sum): bool
+    public static function sha1Exists(string $sha1sum): bool
     {
         return countElementsInTable(self::$table, ['sha1sum' => $sha1sum]) > 0;
     }

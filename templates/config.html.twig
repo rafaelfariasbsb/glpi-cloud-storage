@@ -6,7 +6,7 @@
     <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
 
     <div class="row">
-        {{ fields.largeTitle(__('Connection'), 'ti ti-plug', true) }}
+        {{ fields.largeTitle(__('General'), 'ti ti-settings', true) }}
 
         {{ fields.dropdownYesNo(
             'enabled',
@@ -15,64 +15,80 @@
             field_options
         ) }}
 
-        {{ fields.textField(
-            'account_name',
-            config['account_name'] ?? '',
-            __('Account Name'),
+        {{ fields.dropdownArrayField(
+            'provider',
+            config['provider'] ?? 'azure',
+            {
+                'azure': __('Azure Blob Storage'),
+            },
+            __('Storage Provider'),
             field_options|merge({
-                'helper': __('Azure Storage Account name (e.g. myaccount)'),
+                'helper': __('Cloud storage provider to use for document storage'),
             })
         ) }}
 
-        {{ fields.passwordField(
-            'connection_string',
-            config['connection_string'] ?? '',
-            __('Connection String'),
-            field_options|merge({
-                'clearable': true,
-                'helper': __('Full Azure Storage connection string'),
-            })
-        ) }}
+        {{ fields.largeTitle(__('Azure Connection'), 'ti ti-plug') }}
 
-        {{ fields.passwordField(
-            'account_key',
-            config['account_key'] ?? '',
-            __('Account Key'),
-            field_options|merge({
-                'clearable': true,
-                'helper': __('Azure Storage Account access key'),
-            })
-        ) }}
+        <div id="azure-fields">
+            {{ fields.textField(
+                'azure_account_name',
+                config['azure_account_name'] ?? '',
+                __('Account Name'),
+                field_options|merge({
+                    'helper': __('Azure Storage Account name (e.g. myaccount)'),
+                })
+            ) }}
 
-        {{ fields.textField(
-            'container_name',
-            config['container_name'] ?? 'glpi-documents',
-            __('Container Name'),
-            field_options|merge({
-                'helper': __('Blob container name where documents will be stored'),
-            })
-        ) }}
+            {{ fields.passwordField(
+                'azure_connection_string',
+                config['azure_connection_string'] ?? '',
+                __('Connection String'),
+                field_options|merge({
+                    'clearable': true,
+                    'helper': __('Full Azure Storage connection string'),
+                })
+            ) }}
+
+            {{ fields.passwordField(
+                'azure_account_key',
+                config['azure_account_key'] ?? '',
+                __('Account Key'),
+                field_options|merge({
+                    'clearable': true,
+                    'helper': __('Azure Storage Account access key'),
+                })
+            ) }}
+
+            {{ fields.textField(
+                'azure_container_name',
+                config['azure_container_name'] ?? 'glpi-documents',
+                __('Container Name'),
+                field_options|merge({
+                    'helper': __('Blob container name where documents will be stored'),
+                })
+            ) }}
+        </div>
 
         {{ fields.largeTitle(__('Storage Behavior'), 'ti ti-settings') }}
 
         {{ fields.dropdownArrayField(
             'storage_mode',
-            config['storage_mode'] ?? 'azure_primary',
+            config['storage_mode'] ?? 'cloud_primary',
             {
-                'azure_primary': __('Azure Primary - Delete local copy after upload'),
-                'azure_backup': __('Azure Backup - Keep both local and Azure copies'),
+                'cloud_primary': __('Cloud Primary - Delete local copy after upload'),
+                'cloud_backup': __('Cloud Backup - Keep both local and cloud copies'),
             },
             __('Storage Mode'),
             field_options|merge({
-                'helper': __('Controls whether local files are kept after upload to Azure'),
+                'helper': __('Controls whether local files are kept after upload to cloud storage'),
             })
         ) }}
 
         {{ fields.dropdownArrayField(
             'download_method',
-            config['download_method'] ?? 'sas_redirect',
+            config['download_method'] ?? 'redirect',
             {
-                'sas_redirect': __('SAS Redirect - Redirect browser to Azure temporary URL'),
+                'redirect': __('Redirect - Redirect browser to temporary cloud URL'),
                 'proxy': __('Proxy - Stream through GLPI server'),
             },
             __('Download Method'),
@@ -82,14 +98,14 @@
         ) }}
 
         {{ fields.numberField(
-            'sas_expiry_minutes',
-            config['sas_expiry_minutes'] ?? '10',
-            __('SAS URL Expiry (minutes)'),
+            'url_expiry_minutes',
+            config['url_expiry_minutes'] ?? '5',
+            __('URL Expiry (minutes)'),
             field_options|merge({
                 'min': 1,
                 'max': 1440,
                 'step': 1,
-                'helper': __('How long SAS URLs remain valid (only for SAS Redirect mode)'),
+                'helper': __('How long temporary URLs remain valid (only for Redirect mode)'),
             })
         ) }}
     </div>
