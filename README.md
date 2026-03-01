@@ -142,11 +142,13 @@ terraform init && terraform plan && terraform apply
 
 ## Documentation
 
+- [Documentation Index](docs/index.md)
 - [Installation](docs/installation.md)
 - [Configuration](docs/configuration.md)
 - [Architecture](docs/architecture.md)
-- [Migration](docs/migration.md)
 - [Security](docs/security.md)
+- [Migration](docs/migration.md)
+- [Development Guide](docs/development-guide.md)
 - [FAQ](docs/faq.md)
 
 ## Project Structure

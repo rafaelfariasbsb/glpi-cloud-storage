@@ -1,5 +1,44 @@
 # Architecture & Technical Details
 
+## System Context
+
+```
+┌──────────────────────────────────┐
+│          GLPI Application        │
+│                                  │
+│  ┌─────────┐    ┌─────────────┐  │
+│  │Document  │───▸│Plugin Hooks │  │
+│  │Lifecycle │    │(setup.php)  │  │
+│  └─────────┘    └──────┬──────┘  │
+│                        │         │
+│  ┌─────────────────────▼──────┐  │
+│  │   azureblobstorage plugin  │  │
+│  │                            │  │
+│  │  DocumentHook              │  │
+│  │  AzureBlobClient           │  │
+│  │  DocumentTracker           │  │
+│  │  Config                    │  │
+│  └────────────┬───────────────┘  │
+│               │                  │
+└───────────────┼──────────────────┘
+                │
+    ┌───────────▼───────────┐
+    │  Azure Blob Storage   │
+    │  (or Azurite locally) │
+    └───────────────────────┘
+```
+
+## Core Classes
+
+| Class | Responsibility | Pattern |
+|-------|---------------|---------|
+| `DocumentHook` | Handles ITEM_ADD, ITEM_UPDATE, PRE_ITEM_PURGE hooks | Static event handler |
+| `AzureBlobClient` | Azure SDK wrapper (Flysystem + SAS URL generation) | Singleton |
+| `Config` | Plugin configuration CRUD (wraps GLPI Config API) | Static utility with per-request cache |
+| `DocumentTracker` | ORM for `glpi_plugin_azureblobstorage_documenttrackers` table | CommonDBTM (GLPI ORM) |
+| `MigrateCommand` | Batch migration: local → Azure | Symfony Console Command |
+| `MigrateLocalCommand` | Reverse migration: Azure → local | Symfony Console Command |
+
 ## How It Works (Without Modifying GLPI Core)
 
 This plugin does NOT modify any GLPI core files. It uses GLPI's native hook system to intercept document lifecycle events.
@@ -160,10 +199,105 @@ php bin/console plugins:azureblobstorage:migrate-local [--batch-size=100] [--del
 
 The reverse migration verifies SHA1 integrity of existing local files before removing tracker records. If a local file has a different SHA1 than expected, it downloads the correct version from Azure.
 
-## Dependencies
+## Dependency Tree
+
+```
+DocumentHook
+  ├── Config (checks enabled, storage mode)
+  ├── AzureBlobClient (upload/delete)
+  ├── DocumentTracker (track/check dedup)
+  └── GLPI: Document, countElementsInTable, GLPI_DOC_DIR
+
+AzureBlobClient (Singleton)
+  ├── Config (gets connection params)
+  ├── League\Flysystem\Filesystem
+  ├── League\Flysystem\AzureBlobStorage\AzureBlobStorageAdapter
+  ├── MicrosoftAzure\Storage\Blob\BlobRestProxy
+  └── MicrosoftAzure\Storage\Blob\BlobSharedAccessSignatureHelper
+
+DocumentTracker (extends CommonDBTM)
+  └── GLPI: CommonDBTM, countElementsInTable
+
+Config
+  └── GLPI: \Config (getConfigurationValues, setConfigurationValues)
+
+MigrateCommand / MigrateLocalCommand
+  ├── GLPI: Glpi\Console\AbstractCommand
+  ├── AzureBlobClient
+  ├── DocumentTracker
+  └── Symfony\Component\Console\*
+```
+
+## Dependencies (Composer)
 
 | Package | Purpose |
 |---------|---------|
 | `league/flysystem` | Filesystem abstraction |
 | `league/flysystem-azure-blob-storage` | Azure Blob adapter for Flysystem |
 | `microsoft/azure-storage-blob` | Native Azure SDK (for SAS URL generation) |
+
+## Error Handling Strategy
+
+The plugin follows a **graceful degradation** pattern:
+
+| Scenario | Behavior |
+|----------|----------|
+| Azure unavailable during upload | File stays local, error logged. Upload can be retried via migration CLI. |
+| Azure unavailable during download | Returns error. In backup mode, falls back to local file. |
+| Azure unavailable during delete | Document purge proceeds normally. Orphan blob cleaned later. |
+| Invalid credentials | "Test Connection" button alerts. Uploads fail gracefully. |
+
+All errors are logged via `trigger_error()` with `E_USER_WARNING` — they never prevent GLPI core operations from completing.
+
+## Infrastructure (Terraform)
+
+```
+┌─────────────────────────────────────────────┐
+│              Azure Cloud                     │
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │   Module: networking                 │    │
+│  │   - Resource Group                   │    │
+│  │   - Log Analytics Workspace          │    │
+│  │   - Container App Environment        │    │
+│  └──────────────────────────────────────┘    │
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │   Module: storage                    │    │
+│  │   - Storage Account (LRS/GRS/ZRS)    │    │
+│  │   - Blob Container (glpi-documents)  │    │
+│  │   - Soft delete + versioning         │    │
+│  └──────────────────────────────────────┘    │
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │   Module: database                   │    │
+│  │   - MariaDB Container App            │    │
+│  │   - Azure File Share (persistent)    │    │
+│  └──────────────────────────────────────┘    │
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │   Module: glpi                       │    │
+│  │   - GLPI Container App               │    │
+│  │   - Secrets (DB pass, storage keys)  │    │
+│  │   - External ingress (HTTPS)         │    │
+│  │   - Auto-scaling (1-3 replicas)      │    │
+│  └──────────────────────────────────────┘    │
+│                                              │
+└─────────────────────────────────────────────┘
+```
+
+See the [Terraform section in the Development Guide](development-guide.md#terraform-infrastructure) for setup instructions.
+
+## Testing Strategy
+
+- PHPUnit 11.5 + Paratest (via GLPI test infrastructure)
+- Plugin tests extend `DbTestCase` (transaction rollback per test)
+- vfsStream available for filesystem mocking
+
+| Class | What to Test |
+|-------|-------------|
+| `DocumentHook` | Upload on add, update on file change, delete on purge, deduplication, azure_primary vs backup mode |
+| `DocumentTracker` | track(), isInAzure(), sha1ExistsInAzure(), countBySha1(), removeByDocumentId() |
+| `Config` | getPluginConfig(), isEnabled(), isAzurePrimary(), getDownloadMethod(), cache invalidation |
+| `AzureBlobClient` | upload(), download(), generateSasUrl(), testConnection(), parseBlobEndpoint() |
+| `MigrateCommand` | Batch processing, dedup handling, --dry-run, --delete-local, error recovery |
