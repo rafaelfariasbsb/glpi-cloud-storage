@@ -44,10 +44,12 @@ class MigrateLocalCommand extends AbstractCommand
             $output->writeln('<info>DRY RUN - no changes will be made</info>');
         }
 
-        // Count tracked documents
-        $tracker = new DocumentTracker();
-        $allTracked = $tracker->find([], [], 0);
-        $total = count($allTracked);
+        // Count tracked documents using query builder
+        $countResult = $DB->request([
+            'COUNT' => 'total',
+            'FROM'  => 'glpi_plugin_azureblobstorage_documents',
+        ]);
+        $total = (int) ($countResult->current()['total'] ?? 0);
 
         if ($total === 0) {
             $output->writeln('<info>No documents tracked in Azure. Nothing to migrate back.</info>');
@@ -60,69 +62,92 @@ class MigrateLocalCommand extends AbstractCommand
         $downloaded = 0;
         $skipped = 0;
         $errors = 0;
+        $failedIds = [];
 
-        foreach ($allTracked as $record) {
-            $processed++;
-            $docId = (int) $record['documents_id'];
-            $blobPath = $record['azure_blob_name'];
-            $filepath = $record['filepath'];
-            $localPath = GLPI_DOC_DIR . '/' . $filepath;
+        // Process in batches to avoid OOM on large datasets
+        while (true) {
+            $criteria = [
+                'FROM'  => 'glpi_plugin_azureblobstorage_documents',
+                'LIMIT' => $batchSize,
+            ];
 
-            if ($dryRun) {
-                $output->writeln(sprintf(
-                    '  [DRY RUN] Would download document #%d: %s',
-                    $docId,
-                    $filepath
-                ), OutputInterface::VERBOSITY_VERBOSE);
-                $downloaded++;
-                continue;
+            if (!empty($failedIds)) {
+                $criteria['WHERE'] = [
+                    'NOT' => ['id' => $failedIds],
+                ];
             }
 
-            // Skip if local file already exists
-            if (file_exists($localPath)) {
-                $output->writeln(sprintf(
-                    '  <comment>Skipped document #%d: local file already exists</comment>',
-                    $docId
-                ), OutputInterface::VERBOSITY_VERBOSE);
-                $skipped++;
+            $batch = $DB->request($criteria);
 
-                // Remove tracking record since file is local
-                DocumentTracker::removeByDocumentId($docId);
-                continue;
+            if (count($batch) === 0) {
+                break;
             }
 
-            try {
-                $client = AzureBlobClient::getInstance();
-                $client->downloadToFile($blobPath, $localPath);
+            foreach ($batch as $record) {
+                $processed++;
+                $docId = (int) $record['documents_id'];
+                $blobPath = $record['azure_blob_name'];
+                $filepath = $record['filepath'];
+                $localPath = GLPI_DOC_DIR . '/' . $filepath;
 
-                // Remove tracking record
-                DocumentTracker::removeByDocumentId($docId);
+                if ($dryRun) {
+                    $output->writeln(sprintf(
+                        '  [DRY RUN] Would download document #%d: %s',
+                        $docId,
+                        $filepath
+                    ), OutputInterface::VERBOSITY_VERBOSE);
+                    $downloaded++;
+                    $failedIds[] = (int) $record['id'];
+                    continue;
+                }
 
-                $downloaded++;
-                $output->writeln(sprintf(
-                    '  Downloaded document #%d: %s',
-                    $docId,
-                    $filepath
-                ), OutputInterface::VERBOSITY_VERBOSE);
-            } catch (\Throwable $e) {
-                $errors++;
-                $output->writeln(sprintf(
-                    '  <error>Failed document #%d (%s): %s</error>',
-                    $docId,
-                    $filepath,
-                    $e->getMessage()
-                ));
-            }
+                // Skip if local file already exists
+                if (file_exists($localPath)) {
+                    $output->writeln(sprintf(
+                        '  <comment>Skipped document #%d: local file already exists</comment>',
+                        $docId
+                    ), OutputInterface::VERBOSITY_VERBOSE);
+                    $skipped++;
 
-            if ($processed % 50 === 0) {
-                $output->writeln(sprintf(
-                    '<info>Progress: %d/%d (downloaded: %d, skipped: %d, errors: %d)</info>',
-                    $processed,
-                    $total,
-                    $downloaded,
-                    $skipped,
-                    $errors
-                ));
+                    // Remove tracking record since file is local
+                    DocumentTracker::removeByDocumentId($docId);
+                    continue;
+                }
+
+                try {
+                    $client = AzureBlobClient::getInstance();
+                    $client->downloadToFile($blobPath, $localPath);
+
+                    // Remove tracking record
+                    DocumentTracker::removeByDocumentId($docId);
+
+                    $downloaded++;
+                    $output->writeln(sprintf(
+                        '  Downloaded document #%d: %s',
+                        $docId,
+                        $filepath
+                    ), OutputInterface::VERBOSITY_VERBOSE);
+                } catch (\Throwable $e) {
+                    $errors++;
+                    $failedIds[] = (int) $record['id'];
+                    $output->writeln(sprintf(
+                        '  <error>Failed document #%d (%s): %s</error>',
+                        $docId,
+                        $filepath,
+                        $e->getMessage()
+                    ));
+                }
+
+                if ($processed % 50 === 0) {
+                    $output->writeln(sprintf(
+                        '<info>Progress: %d/%d (downloaded: %d, skipped: %d, errors: %d)</info>',
+                        $processed,
+                        $total,
+                        $downloaded,
+                        $skipped,
+                        $errors
+                    ));
+                }
             }
         }
 

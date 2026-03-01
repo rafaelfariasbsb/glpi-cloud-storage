@@ -98,10 +98,6 @@
 {% block extra_form %}
     <form method="POST" action="config.form.php">
         <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}" />
-        <input type="hidden" name="connection_string" value="{{ config['connection_string'] ?? '' }}" />
-        <input type="hidden" name="account_name" value="{{ config['account_name'] ?? '' }}" />
-        <input type="hidden" name="account_key" value="{{ config['account_key'] ?? '' }}" />
-        <input type="hidden" name="container_name" value="{{ config['container_name'] ?? 'glpi-documents' }}" />
         <div class="card mt-3">
             <div class="card-body">
                 <button type="submit" name="test_connection" class="btn btn-outline-secondary">

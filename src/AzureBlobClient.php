@@ -18,6 +18,7 @@ class AzureBlobClient
     private string $containerName;
     private string $accountName;
     private string $accountKey;
+    private string $blobEndpoint;
 
     private function __construct(
         string $connectionString,
@@ -28,6 +29,7 @@ class AzureBlobClient
         $this->containerName = $containerName;
         $this->accountName = $accountName;
         $this->accountKey = $accountKey;
+        $this->blobEndpoint = self::parseBlobEndpoint($connectionString, $accountName);
 
         $this->blobClient = BlobRestProxy::createBlobService($connectionString);
 
@@ -37,6 +39,42 @@ class AzureBlobClient
         );
 
         $this->filesystem = new Filesystem($adapter);
+    }
+
+    /**
+     * Parse the Blob endpoint from a connection string.
+     *
+     * Supports standard Azure, Azurite (local emulator), Azure Government,
+     * and Azure China by reading BlobEndpoint or constructing from
+     * EndpointSuffix + AccountName.
+     */
+    private static function parseBlobEndpoint(string $connectionString, string $accountName): string
+    {
+        $parts = [];
+        foreach (explode(';', $connectionString) as $segment) {
+            $segment = trim($segment);
+            if ($segment === '') {
+                continue;
+            }
+            $eqPos = strpos($segment, '=');
+            if ($eqPos !== false) {
+                $key = substr($segment, 0, $eqPos);
+                $value = substr($segment, $eqPos + 1);
+                $parts[$key] = $value;
+            }
+        }
+
+        // Explicit BlobEndpoint takes priority (used by Azurite and custom setups)
+        if (!empty($parts['BlobEndpoint'])) {
+            return rtrim($parts['BlobEndpoint'], '/');
+        }
+
+        // Construct from protocol + account + suffix
+        $protocol = $parts['DefaultEndpointsProtocol'] ?? 'https';
+        $account = $parts['AccountName'] ?? $accountName;
+        $suffix = $parts['EndpointSuffix'] ?? 'core.windows.net';
+
+        return sprintf('%s://%s.blob.%s', $protocol, $account, $suffix);
     }
 
     public static function getInstance(): self
@@ -101,6 +139,16 @@ class AzureBlobClient
     public function download(string $blobPath): string
     {
         return $this->filesystem->read($blobPath);
+    }
+
+    /**
+     * Get a readable stream for a blob (memory-safe for large files).
+     *
+     * @return resource
+     */
+    public function readStream(string $blobPath)
+    {
+        return $this->filesystem->readStream($blobPath);
     }
 
     /**
@@ -192,8 +240,8 @@ class AzureBlobClient
         );
 
         return sprintf(
-            'https://%s.blob.core.windows.net/%s/%s?%s',
-            $this->accountName,
+            '%s/%s/%s?%s',
+            $this->blobEndpoint,
             $this->containerName,
             $blobPath,
             $sas

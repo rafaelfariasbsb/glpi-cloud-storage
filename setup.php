@@ -24,7 +24,7 @@ function plugin_version_azureblobstorage(): array
         'version'        => PLUGIN_AZUREBLOBSTORAGE_VERSION,
         'author'         => 'Rafael Farias',
         'license'        => 'GPLv3',
-        'homepage'       => 'https://github.com/rafaelfariasbsb/glpi',
+        'homepage'       => 'https://github.com/rafaelfariasbsb/glpi-cloud-storage',
         'requirements'   => [
             'glpi' => [
                 'min' => PLUGIN_AZUREBLOBSTORAGE_MIN_GLPI_VERSION,

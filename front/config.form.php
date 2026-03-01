@@ -47,12 +47,8 @@ if (isset($_POST['update'])) {
 if (isset($_POST['test_connection'])) {
     Session::checkCSRF($_POST);
 
-    $result = Config::testConnection(
-        $_POST['connection_string'] ?? null,
-        $_POST['container_name'] ?? null,
-        $_POST['account_name'] ?? null,
-        $_POST['account_key'] ?? null
-    );
+    // Use saved config — credentials are not sent from the form
+    $result = Config::testConnection();
 
     if ($result === true) {
         Session::addMessageAfterRedirect(

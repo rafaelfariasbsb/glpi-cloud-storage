@@ -52,18 +52,27 @@ class MigrateCommand extends AbstractCommand
             $output->writeln('<info>DRY RUN - no changes will be made</info>');
         }
 
-        // Count documents to migrate
-        $countQuery = "SELECT COUNT(*) AS total
-            FROM `glpi_documents` d
-            LEFT JOIN `glpi_plugin_azureblobstorage_documents` t
-                ON d.`id` = t.`documents_id`
-            WHERE d.`filepath` IS NOT NULL
-              AND d.`filepath` != ''
-              AND t.`id` IS NULL";
+        // Count documents to migrate using GLPI query builder
+        $countResult = $DB->request([
+            'COUNT'     => 'total',
+            'FROM'      => 'glpi_documents AS d',
+            'LEFT JOIN' => [
+                'glpi_plugin_azureblobstorage_documents AS t' => [
+                    'ON' => [
+                        'd' => 'id',
+                        't' => 'documents_id',
+                    ],
+                ],
+            ],
+            'WHERE' => [
+                'NOT' => ['d.filepath' => null],
+                ['d.filepath', '!=', ''],
+                'd.filepath' => ['!=', ''],
+                't.id'       => null,
+            ],
+        ]);
 
-        $result = $DB->query($countQuery);
-        $row = $result->fetch_assoc();
-        $total = (int) ($row['total'] ?? 0);
+        $total = (int) ($countResult->current()['total'] ?? 0);
 
         if ($total === 0) {
             $output->writeln('<info>No documents to migrate. All documents are already tracked in Azure.</info>');
@@ -90,26 +99,40 @@ class MigrateCommand extends AbstractCommand
         $uploaded = 0;
         $skipped = 0;
         $errors = 0;
+        $failedIds = [];
 
-        $offset = 0;
+        while (true) {
+            $criteria = [
+                'SELECT' => ['d.id', 'd.filepath', 'd.sha1sum', 'd.filename'],
+                'FROM'      => 'glpi_documents AS d',
+                'LEFT JOIN' => [
+                    'glpi_plugin_azureblobstorage_documents AS t' => [
+                        'ON' => [
+                            'd' => 'id',
+                            't' => 'documents_id',
+                        ],
+                    ],
+                ],
+                'WHERE' => [
+                    'NOT' => ['d.filepath' => null],
+                    'd.filepath' => ['!=', ''],
+                    't.id'       => null,
+                ],
+                'LIMIT' => $batchSize,
+            ];
 
-        while ($offset < $total) {
-            $query = "SELECT d.`id`, d.`filepath`, d.`sha1sum`, d.`filename`
-                FROM `glpi_documents` d
-                LEFT JOIN `glpi_plugin_azureblobstorage_documents` t
-                    ON d.`id` = t.`documents_id`
-                WHERE d.`filepath` IS NOT NULL
-                  AND d.`filepath` != ''
-                  AND t.`id` IS NULL
-                LIMIT $batchSize";
+            // Exclude previously failed document IDs to prevent infinite retry loop
+            if (!empty($failedIds)) {
+                $criteria['WHERE'][] = ['NOT' => ['d.id' => $failedIds]];
+            }
 
-            $result = $DB->query($query);
+            $result = $DB->request($criteria);
 
-            if ($result === false || $DB->numrows($result) === 0) {
+            if (count($result) === 0) {
                 break;
             }
 
-            while ($doc = $result->fetch_assoc()) {
+            foreach ($result as $doc) {
                 $processed++;
                 $docId = (int) $doc['id'];
                 $filepath = $doc['filepath'];
@@ -133,6 +156,7 @@ class MigrateCommand extends AbstractCommand
                         $filepath
                     ), OutputInterface::VERBOSITY_VERBOSE);
                     $skipped++;
+                    $failedIds[] = $docId;
                     continue;
                 }
 
@@ -142,7 +166,12 @@ class MigrateCommand extends AbstractCommand
                     DocumentTracker::track($docId, $filepath, $sha1sum, $fileSize);
 
                     if ($deleteLocal) {
-                        @unlink($localPath);
+                        if (!unlink($localPath)) {
+                            trigger_error(
+                                sprintf('[AzureBlobStorage] Failed to delete local file: %s', $localPath),
+                                E_USER_WARNING
+                            );
+                        }
                     }
 
                     $uploaded++;
@@ -161,7 +190,12 @@ class MigrateCommand extends AbstractCommand
                     DocumentTracker::track($docId, $filepath, $sha1sum, $fileSize);
 
                     if ($deleteLocal) {
-                        @unlink($localPath);
+                        if (!unlink($localPath)) {
+                            trigger_error(
+                                sprintf('[AzureBlobStorage] Failed to delete local file: %s', $localPath),
+                                E_USER_WARNING
+                            );
+                        }
                     }
 
                     $uploaded++;
@@ -172,6 +206,7 @@ class MigrateCommand extends AbstractCommand
                     ), OutputInterface::VERBOSITY_VERBOSE);
                 } catch (\Throwable $e) {
                     $errors++;
+                    $failedIds[] = $docId;
                     $output->writeln(sprintf(
                         '  <error>Failed document #%d (%s): %s</error>',
                         $docId,
@@ -192,8 +227,6 @@ class MigrateCommand extends AbstractCommand
                     ));
                 }
             }
-
-            $offset += $batchSize;
         }
 
         $output->writeln('');

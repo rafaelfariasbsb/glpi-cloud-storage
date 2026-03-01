@@ -25,7 +25,13 @@ function plugin_azureblobstorage_install(): bool
             KEY `sha1sum` (`sha1sum`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
-        $DB->query($query) or die("Error creating glpi_plugin_azureblobstorage_documents: " . $DB->error());
+        if (!$DB->query($query)) {
+            trigger_error(
+                sprintf('[AzureBlobStorage] Error creating table: %s', $DB->error()),
+                E_USER_ERROR
+            );
+            return false;
+        }
     }
 
     // Set default config values

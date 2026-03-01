@@ -35,8 +35,14 @@ class DocumentHook
             DocumentTracker::track($item->getID(), $filepath, $sha1sum, $fileSize);
 
             if (Config::isAzurePrimary()) {
-                @unlink($localPath);
-                self::cleanEmptyDirs(dirname($localPath));
+                if (!unlink($localPath)) {
+                    trigger_error(
+                        sprintf('[AzureBlobStorage] Failed to delete local file: %s', $localPath),
+                        E_USER_WARNING
+                    );
+                } else {
+                    self::cleanEmptyDirs(dirname($localPath));
+                }
             }
             return;
         }
@@ -53,8 +59,14 @@ class DocumentHook
 
             // In "Azure Primary" mode, remove the local copy after confirmed upload
             if (Config::isAzurePrimary()) {
-                @unlink($localPath);
-                self::cleanEmptyDirs(dirname($localPath));
+                if (!unlink($localPath)) {
+                    trigger_error(
+                        sprintf('[AzureBlobStorage] Failed to delete local file: %s', $localPath),
+                        E_USER_WARNING
+                    );
+                } else {
+                    self::cleanEmptyDirs(dirname($localPath));
+                }
             }
         } catch (\Throwable $e) {
             // Log error but do NOT prevent document creation
@@ -114,8 +126,14 @@ class DocumentHook
 
             // Remove local copy if Azure Primary
             if (Config::isAzurePrimary()) {
-                @unlink($localPath);
-                self::cleanEmptyDirs(dirname($localPath));
+                if (!unlink($localPath)) {
+                    trigger_error(
+                        sprintf('[AzureBlobStorage] Failed to delete local file: %s', $localPath),
+                        E_USER_WARNING
+                    );
+                } else {
+                    self::cleanEmptyDirs(dirname($localPath));
+                }
             }
 
             // Clean up old Azure blob if no longer referenced
@@ -229,7 +247,9 @@ class DocumentHook
             if ($files === false || count($files) > 2) { // . and ..
                 break;
             }
-            @rmdir($dir);
+            if (!rmdir($dir)) {
+                break;
+            }
             $dir = dirname($dir);
         }
     }

@@ -79,9 +79,8 @@ try {
         return $response;
     }
 
-    // Proxy mode: stream content through GLPI
+    // Proxy mode: stream content through GLPI (memory-safe for large files)
     $client = AzureBlobClient::getInstance();
-    $content = $client->download($blobPath);
 
     $filename = $doc->fields['filename'] ?? basename($blobPath);
     $mime = $doc->fields['mime'] ?? 'application/octet-stream';
@@ -95,10 +94,17 @@ try {
         $disposition = 'inline';
     }
 
-    $response = new Response($content, 200, [
+    $response = new StreamedResponse(function () use ($client, $blobPath) {
+        $stream = $client->readStream($blobPath);
+        $out = fopen('php://output', 'wb');
+        stream_copy_to_stream($stream, $out);
+        if (is_resource($stream)) {
+            fclose($stream);
+        }
+        fclose($out);
+    }, 200, [
         'Content-Type'        => $mime,
         'Content-Disposition' => sprintf('%s; filename="%s"', $disposition, $filename),
-        'Content-Length'      => strlen($content),
         'Cache-Control'       => 'private, must-revalidate',
     ]);
 
