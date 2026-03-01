@@ -91,8 +91,27 @@ Admin purges document
 
 GLPI uses SHA1 to deduplicate files: two documents with the same content point to the same physical file. The plugin maintains this same logic:
 
-- On upload: if a blob with the same SHA1 already exists in Azure, it skips the upload
+- On upload: if a blob with the same SHA1 already exists in Azure, it **verifies the blob actually exists** before skipping the upload (guards against external deletion)
 - On delete: only removes the blob if no other document references the same SHA1
+
+## Configuration Caching
+
+`Config::getPluginConfig()` caches decrypted configuration values in a static property for the duration of the request. This avoids repeated DB queries when multiple hooks check `isEnabled()`, `isAzurePrimary()`, etc. in the same request cycle. The cache is automatically invalidated when `Config::set()` is called.
+
+## Input Validation
+
+The configuration form handler (`front/config.form.php`) validates all POST values before saving:
+
+- `storage_mode`: must be `azure_primary` or `azure_backup`
+- `download_method`: must be `sas_redirect` or `proxy`
+- `sas_expiry_minutes`: clamped to range 1–1440
+- `enabled`: must be `0` or `1`
+
+Invalid values are silently rejected (not saved).
+
+## Uninstall Safety
+
+The plugin **refuses to uninstall** (`return false`) if there are still documents tracked in Azure. The administrator must first run `php bin/console plugins:azureblobstorage:migrate-local` to download all documents back to local storage before uninstalling.
 
 ## Database Schema
 
@@ -122,6 +141,24 @@ CREATE TABLE `glpi_plugin_azureblobstorage_documenttrackers` (
 | `Hooks::CONFIG_PAGE` | - | Plugin configuration page |
 | `Hooks::SECURED_CONFIGS` | - | Encrypt connection_string and account_key |
 | `Hooks::ADD_JAVASCRIPT` | - | URL rewriter script |
+
+## URL Rewriting
+
+The `url-rewriter.js` script dynamically derives its base path from its own `<script src>` URL, supporting GLPI installations in subdirectories (e.g., `/glpi/plugins/...`). It falls back to `/plugins/azureblobstorage/front/document.send.php` if detection fails.
+
+## CLI Commands
+
+### Migrate to Azure
+```bash
+php bin/console plugins:azureblobstorage:migrate [--batch-size=100] [--delete-local] [--dry-run]
+```
+
+### Migrate back to Local
+```bash
+php bin/console plugins:azureblobstorage:migrate-local [--batch-size=100] [--delete-azure] [--dry-run]
+```
+
+The reverse migration verifies SHA1 integrity of existing local files before removing tracker records. If a local file has a different SHA1 than expected, it downloads the correct version from Azure.
 
 ## Dependencies
 

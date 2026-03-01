@@ -4,6 +4,8 @@
 
 - **Connection string** and **account key** are stored encrypted in the GLPI database using the native `SECURED_CONFIGS` mechanism (AES encryption)
 - Credentials are never exposed in logs or error messages
+- Error messages from Azure SDK are sanitized via regex to redact base64-encoded keys before display or logging
+- The `testConnection()` method also sanitizes error output to prevent credential leakage in the admin UI
 
 ## SAS URLs
 
@@ -18,16 +20,41 @@
 - Users can only download documents they have permission to view
 - Anonymous access follows the same rules as GLPI's public FAQ documents
 
+## Input Validation
+
+- Configuration form validates all POST values before saving:
+  - `storage_mode` and `download_method` are checked against a whitelist of allowed values
+  - `sas_expiry_minutes` is clamped to range 1–1440
+  - `enabled` is restricted to `0` or `1`
+- Invalid values are silently rejected (not saved to database)
+
 ## CSRF Protection
 
 - All configuration forms use GLPI's native CSRF tokens
-- Form submissions are validated with `Session::checkCSRF()`
+- Form submissions are validated automatically by GLPI 11's `CheckCsrfListener`
 
 ## Azure Container Configuration
 
 - The Azure Blob container **must be configured as Private** (no anonymous access)
 - Access is exclusively through authenticated API calls or SAS URLs
 - Enable **Azure Storage firewalls** if you want to restrict access by IP
+
+## Uninstall Protection
+
+- The plugin **refuses to uninstall** if documents are still tracked in Azure
+- Administrators must first run the reverse migration CLI command to download all documents back to local storage
+- This prevents accidental data loss when the tracking table is dropped
+
+## Deduplication Safety
+
+- When deduplicating uploads (same SHA1), the plugin verifies the blob **actually exists** in Azure before skipping the upload
+- This guards against external blob deletion (e.g., Azure retention policies, manual deletion in portal)
+- If verification fails, the file is re-uploaded as a safety measure
+
+## SAS URL Validation
+
+- SAS expiry is enforced to a minimum of 1 minute to prevent immediately-expired URLs
+- The `testConnection()` method uses paginated blob listing (`maxResults=1`) to prevent memory issues on large containers
 
 ## Recommendations
 
