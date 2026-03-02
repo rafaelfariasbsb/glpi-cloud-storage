@@ -31,6 +31,10 @@
 | `StorageClientFactory` | Singleton behavior, `resetInstance()`, unknown provider exception |
 | `MigrateCommand` | Dry-run flag, dedup inline, excluded IDs on error |
 
+**Additional test scenarios (from backlog):**
+- Migration: test auto-migration from old `azureblobstorage` plugin (config mapping, table rename)
+- End-to-end: both providers (Azure + S3) — upload, download, delete, dedup cycle
+
 **Tools available:** vfsStream (filesystem mock), DbTestCase helpers (`createItem`, `login`, `createTxtDocument`).
 
 ### 3. CI/CD Pipeline (GitHub Actions)
@@ -59,7 +63,9 @@
 - `config.form.php` already validates S3 fields (`s3_bucket`, `s3_region`, `s3_endpoint`, keys)
 - `setup.php` already creates S3 config defaults
 
-**To do:** Create `src/S3Client.php` implementing `StorageClientInterface`, mirror `AzureBlobClient` structure.
+**To do:**
+- Create `src/S3Client.php` implementing `StorageClientInterface`, mirror `AzureBlobClient` structure
+- Add MinIO service to `docker-compose.yml` for local S3 testing
 
 ### 5. CLI Sync / Consistency Check Command
 
@@ -207,7 +213,25 @@ cs-fix:
 **Improvement:** JSON-formatted log entries for better parsing/monitoring (ELK, Datadog, etc.).
 **Low priority:** Current logging is already well-structured with error messages + stack traces + secret redaction.
 
-### 19. Storage Firewall Documentation
+### 19. Expand `.gitignore`
+
+**Status:** Current `.gitignore` only excludes `**/vendor/`.
+**Add:** `.env`, `.idea/`, `.vscode/`, `.DS_Store`, `*.cache`, `composer.lock` (plugin convention — lock file not committed).
+**Source:** Security audit MEDIA-04.
+
+### 20. Create `.dockerignore`
+
+**Status:** Does not exist.
+**Add:** `.git/`, `vendor/`, `docs/`, `*.md`, `.idea/`, `.vscode/`, `tests/` — standard exclusions to keep Docker context lean.
+**Source:** Security audit MEDIA-05.
+
+### 21. Credential Placeholder Pattern in Config Template
+
+**Status:** Config form sends actual encrypted values to the browser for password fields.
+**Improvement:** Use a placeholder pattern (e.g., `••••••••`) in the template for secret fields. Only update the DB value if the user submits a non-placeholder value. Prevents accidental credential exposure in browser DOM.
+**Source:** Security audit BAIXA-06.
+
+### 22. Storage Firewall Documentation
 
 **Status:** No documentation on securing Azure Blob Storage at the network level.
 **Scope:** This is infrastructure configuration, not plugin code. Document how to:
@@ -221,28 +245,30 @@ cs-fix:
 
 ## P4 — Future / Nice-to-Have
 
-### 20. Dashboard with Statistics
+### 23. Dashboard with Statistics
 
 Plugin settings page showing: total documents in cloud, total size, estimated cost, upload/download counts.
 
-### 21. Email Notification on Repeated Upload Failures
+### 24. Email Notification on Repeated Upload Failures
 
 Integrate with GLPI's `NotificationEvent` to alert admins when uploads fail X times in Y period.
 
-### 22. Azure Storage Tiers Support (Hot/Cool/Archive)
+### 25. Azure Storage Tiers (Hot/Cool/Archive) — Documentation Only
 
-Set blob tier via metadata. Useful for cost optimization on rarely accessed documents.
+**Decision:** Won't implement as plugin feature. Azure Lifecycle Management policies handle this natively at the storage account level (move Hot→Cool→Archive by last modified date) — no code, no maintenance.
+**Action:** Document as infrastructure recommendation in `docs/05-security.md` or README (e.g., "Configure Azure Lifecycle Management policy to move blobs to Cool tier after 30 days").
+**SDK available:** `setBlobTier()` exists if ever justified, but lifecycle policy is the correct approach.
 
-### 23. Multi-tenant Support (Multiple Containers/Prefixes)
+### 26. Multi-tenant Support (Multiple Containers/Prefixes)
 
 Per-entity or per-profile storage containers. GLPI is typically single-tenant — only relevant for MSP deployments.
 
-### 24. Key Vault Integration for Credentials
+### 27. Key Vault Integration for Credentials
 
 Store Azure/S3 credentials in Azure Key Vault or AWS Secrets Manager instead of GLPI database. Highest security tier.
 **Already in:** Security audit P3 backlog.
 
-### 25. Content-Length Header in Proxy Mode
+### 28. Content-Length Header in Proxy Mode
 
 Add `Content-Length` response header in proxy downloads for better browser progress indication.
 **Already in:** Security audit P3 backlog.
