@@ -1,7 +1,7 @@
 # Cloud Storage Plugin — Roadmap & TODO
 
 > Last updated: 2026-03-01
-> Based on: two external senior dev reviews (`analise.txt`) cross-referenced with actual codebase audit.
+> Based on: three external senior dev reviews (`analise.txt`, `analise.md`) cross-referenced with actual codebase audit.
 
 ---
 
@@ -49,11 +49,65 @@
 
 **Reference:** Copy patterns from official GLPI plugins (e.g., `glpi-project/fields`, `glpi-project/formcreator`).
 
+### 4. Fix `fromParams()` credential leak in error messages
+
+**Status:** Bug confirmed. Security issue.
+**File:** `src/AzureBlobClient.php:66-73`
+**Problem:** `fromConfig()` wraps the Azure SDK call in try/catch with `sanitizeErrorMessage()`, but `fromParams()` does not. Since `fromParams()` is used by "Test Connection" in the config form, an exception can expose the raw connection string in the UI.
+**Fix:** Add try/catch with `sanitizeErrorMessage()` matching the `fromConfig()` pattern.
+**Effort:** 15 minutes
+**Source:** Code review `analise.md` #7
+
+### 5. Fix MigrateCommand dedup missing blob existence check
+
+**Status:** Bug confirmed. Data integrity issue.
+**File:** `src/Console/MigrateCommand.php:175-194`
+**Problem:** `DocumentHook::onItemAdd()` correctly checks `$client->exists($filepath)` before skipping upload on SHA1 match. `MigrateCommand` skips this check — if a blob was deleted externally (or by Azure Lifecycle policy), it creates a tracker for a non-existent blob, making the document inaccessible.
+**Fix:** Add `$client->exists($filepath)` before skipping upload in the dedup branch.
+**Effort:** 15 minutes
+**Source:** Code review `analise.md` #8
+
+### 6. Validate `$_GET['file']` format in document.send.php
+
+**Status:** Bug confirmed. Information disclosure risk.
+**File:** `front/document.send.php:37-38`
+**Problem:** `$_GET['file']` goes directly to `$doc->find()` without format validation. No SQL injection risk (prepared statements), but allows enumeration of document paths in the database.
+**Fix:** Add regex validation for expected GLPI document path format (`EXT/xx/sha1.EXT`).
+**Effort:** 20 minutes
+**Source:** Code review `analise.md` #5
+
+### 7. Remove dead code `cleanEmptyDirs()`
+
+**Status:** Confirmed dead code.
+**File:** `src/DocumentHook.php:298-315`
+**Problem:** Method is defined but never called anywhere in the codebase.
+**Fix:** Remove the method entirely. If needed later, it can be restored from git history.
+**Effort:** 5 minutes
+**Source:** Code review `analise.md` #6
+
+### 8. Move S3 dependencies to `suggest` until Phase 2
+
+**Status:** Confirmed unnecessary weight.
+**File:** `composer.json`
+**Problem:** `league/flysystem-aws-s3-v3` + `aws/aws-sdk-php` add ~50MB to vendor directory. The factory throws `RuntimeException` when S3 is selected. Inflates install size and attack surface for zero functionality.
+**Fix:** Move from `require` to `suggest` with a descriptive message. Re-add to `require` when `S3Client` is implemented.
+**Effort:** 10 minutes
+**Source:** Code review `analise.md` #3
+
+### 9. Add `StorageClientFactory::setInstance()` for testability
+
+**Status:** Missing. Pre-requisite for unit tests (#2).
+**File:** `src/StorageClientFactory.php`
+**Problem:** Factory has `resetInstance()` but no `setInstance()`. Without it, there's no way to inject a mock `StorageClientInterface` when testing `DocumentHook`, `MigrateCommand`, or `document.send.php`.
+**Fix:** Add `public static function setInstance(StorageClientInterface $client): void`.
+**Effort:** 5 minutes
+**Source:** Code review `analise.md` #9
+
 ---
 
 ## P1 — High (before Phase 2 / S3 implementation)
 
-### 4. Implement S3Client
+### 10. Implement S3Client
 
 **Status:** Architecture is 100% ready.
 **What exists:**
@@ -67,7 +121,7 @@
 - Create `src/S3Client.php` implementing `StorageClientInterface`, mirror `AzureBlobClient` structure
 - Add MinIO service to `docker-compose.yml` for local S3 testing
 
-### 5. CLI Sync / Consistency Check Command
+### 11. CLI Sync / Consistency Check Command
 
 **Status:** Does not exist.
 **Purpose:** Verify tracker database vs actual blobs in cloud storage.
@@ -78,7 +132,17 @@
 
 **Implementation:** New `src/Console/SyncCheckCommand.php` — read-only by default, `--fix` flag for cleanup.
 
-### 6. Makefile Targets
+### 12. Rename `--delete-azure` to `--delete-remote`
+
+**Status:** Naming inconsistency with multi-cloud rename.
+**File:** `src/Console/MigrateLocalCommand.php:30-34`
+**Problem:** The plugin was renamed from `azureblobstorage` to `cloudstorage` for multi-cloud support, but the CLI flag remains Azure-specific. Also affects comments in `DocumentHook.php` ("Not tracked in Azure") and `document.send.php` ("Not in Azure").
+**Fix:** Rename flag to `--delete-remote`, update all Azure-specific comments to cloud-generic language.
+**Note:** This is a breaking change for any scripts using `--delete-azure`. Document in CHANGELOG.
+**Effort:** 10 minutes
+**Source:** Code review `analise.md` #11
+
+### 13. Makefile Targets
 
 **Status:** Makefile only includes GLPI's shared makefile.
 **Add:**
@@ -101,7 +165,7 @@ cs-fix:
 
 ## P2 — Medium (production hardening)
 
-### 7. Async Upload via Background Jobs (GLPI Automatic Actions)
+### 14. Async Upload via Background Jobs (GLPI Automatic Actions)
 
 **Status:** Does not exist. Current upload is synchronous inside `ITEM_ADD` hook.
 **Problem:** Large files + slow/unstable Azure connection = long HTTP request blocking the user's browser. A 50MB document on a degraded link can mean 30s+ of wait.
@@ -125,7 +189,7 @@ cs-fix:
 
 **Impact:** Highest UX improvement for production environments with large files or unreliable connectivity.
 
-### 8. Circuit Breaker (Simplified)
+### 15. Circuit Breaker (Simplified)
 
 **Status:** Does not exist. Every upload attempt hits Azure regardless of recent failures.
 **Problem:** If Azure is down, every document upload triggers a timeout + error. N users uploading = N timeout waits.
@@ -133,11 +197,11 @@ cs-fix:
 - Track consecutive failure count in a transient config key (or `$_SESSION` / APCu)
 - After X consecutive failures (configurable, default 5), auto-switch to local-only mode for Y minutes
 - Log warning: "Circuit breaker activated — uploads queued locally"
-- Works best combined with item #7 (Async Upload): failed docs get queued for retry when circuit closes
+- Works best combined with item #14 (Async Upload): failed docs get queued for retry when circuit closes
 
 **Note:** Full circuit breaker pattern (half-open state, gradual recovery) is over-engineering for a GLPI plugin. A simple "fail counter + cooldown timer" is sufficient.
 
-### 9. CDN Endpoint Support
+### 16. CDN Endpoint Support
 
 **Status:** Does not exist. SAS URLs always point directly to Azure Blob Storage hostname.
 **Problem:** Users distributed geographically experience high latency downloading from a single Azure region.
@@ -149,7 +213,7 @@ cs-fix:
 **Implementation:** ~10 lines of code in `AzureBlobClient::generateTemporaryUrl()` + 1 field in config form.
 **Applies to:** Redirect mode only (proxy mode already streams through GLPI server).
 
-### 10. Retry Logic (Exponential Backoff)
+### 17. Retry Logic (Exponential Backoff)
 
 **Status:** Absent across entire codebase. Current design is fail-fast + log + fallback.
 **Where it matters most:**
@@ -158,22 +222,22 @@ cs-fix:
 
 **Approach:** Wrap Flysystem calls with configurable retry (max attempts, base delay). Consider `league/flysystem` retry middleware or simple loop with `usleep()`.
 
-**Lower priority for:** Single document operations (upload on hook) where fail-fast + user notification is acceptable. Even lower priority if Async Upload (#7) is implemented (cron retries naturally).
+**Lower priority for:** Single document operations (upload on hook) where fail-fast + user notification is acceptable. Even lower priority if Async Upload (#14) is implemented (cron retries naturally).
 
-### 11. Azure AD / Managed Identity Authentication
+### 18. Azure AD / Managed Identity Authentication
 
 **Status:** Currently uses connection string / account key only.
 **Why:** Eliminates static credentials in config, follows Azure security best practices.
 **Blocked by:** Requires `azure-oss/storage-blob-flysystem` support or custom adapter.
 **Already in:** Security audit P2 backlog.
 
-### 12. SAS URL IP Restriction
+### 19. SAS URL IP Restriction
 
 **Status:** SAS URLs generated without IP constraint.
 **Improvement:** Add client IP to SAS token generation (`SignedIp` parameter) to restrict URL usage to the requesting user's IP.
 **Already in:** Security audit P2 backlog.
 
-### 13. Rate Limiting for Document Downloads
+### 20. Rate Limiting for Document Downloads
 
 **Status:** No rate limiting on `document.send.php`.
 **Purpose:** Prevent abuse of proxy/redirect download endpoint.
@@ -184,7 +248,7 @@ cs-fix:
 
 ## P3 — Low (quality of life & polish)
 
-### 14. SAS Token Caching
+### 21. SAS Token Caching
 
 **Status:** Every download request in redirect mode generates a new SAS token via `generateTemporaryUrl()`.
 **Problem:** Pages with many attachments (tickets with 20+ documents) generate one SAS per doc per page load.
@@ -192,46 +256,78 @@ cs-fix:
 **Approach:** Cache generated SAS URLs per `(remotePath, userId)` in GLPI Cache API (or `$_SESSION`) for `min(url_expiry - 1min, 3min)`.
 **Low priority:** Marginal gain in most deployments.
 
-### 15. CHANGELOG Format
+### 22. CHANGELOG Format
 
 **Status:** CHANGELOG.md exists but may not follow standard format.
 **Improvement:** Adopt [Keep a Changelog](https://keepachangelog.com/) format for marketplace readiness.
 
-### 16. README Badges
+### 23. README Badges
 
 **Status:** No badges.
 **Add after CI is working:** GLPI version compatibility, PHPStan level, tests passing, license.
 
-### 17. Internationalization (i18n)
+### 24. Internationalization (i18n)
 
 **Status:** Needs verification of `locales/` directory coverage.
 **Minimum:** `en_GB` + `pt_BR`. Marketplace may require English as primary.
 
-### 18. Structured Logging (JSON)
+### 25. Structured Logging (JSON)
 
 **Status:** Currently uses `Toolbox::logInFile()` with plain text.
 **Improvement:** JSON-formatted log entries for better parsing/monitoring (ELK, Datadog, etc.).
 **Low priority:** Current logging is already well-structured with error messages + stack traces + secret redaction.
 
-### 19. Expand `.gitignore`
+### 26. Expand `.gitignore`
 
 **Status:** Current `.gitignore` only excludes `**/vendor/`.
 **Add:** `.env`, `.idea/`, `.vscode/`, `.DS_Store`, `*.cache`, `composer.lock` (plugin convention — lock file not committed).
 **Source:** Security audit MEDIA-04.
 
-### 20. Create `.dockerignore`
+### 27. Create `.dockerignore`
 
 **Status:** Does not exist.
 **Add:** `.git/`, `vendor/`, `docs/`, `*.md`, `.idea/`, `.vscode/`, `tests/` — standard exclusions to keep Docker context lean.
 **Source:** Security audit MEDIA-05.
 
-### 21. Credential Placeholder Pattern in Config Template
+### 28. Credential Placeholder Pattern in Config Template
 
 **Status:** Config form sends actual encrypted values to the browser for password fields.
 **Improvement:** Use a placeholder pattern (e.g., `••••••••`) in the template for secret fields. Only update the DB value if the user submits a non-placeholder value. Prevents accidental credential exposure in browser DOM.
 **Source:** Security audit BAIXA-06.
 
-### 22. Storage Firewall Documentation
+### 29. Centralize config keys (DRY)
+
+**Status:** Same config key list duplicated in 3 files.
+**Files:** `src/Config.php` (`CONFIG_KEYS` constant), `hook.php` (install defaults), `front/config.form.php` (form fields).
+**Problem:** Adding or removing a config key requires editing 3 files manually. Risk of desynchronization.
+**Fix:** Make `Config::CONFIG_KEYS` public and reuse it in `hook.php` and `config.form.php`. Add default values as a separate constant (`Config::CONFIG_DEFAULTS`).
+**Effort:** 30 minutes
+**Source:** Code review `analise.md` #17
+
+### 30. Modernize JavaScript to ES6+
+
+**Status:** `public/js/url-rewriter.js` uses pure ES5 syntax (`var`, `function()`, `for` loops).
+**Problem:** GLPI 11 requires modern browsers (Chrome 80+, Firefox 78+). ES6+ (`const`, arrow functions, `for...of`) is safe and improves readability.
+**Effort:** 30 minutes
+**Source:** Code review `analise.md` #16
+
+### 31. Deprecate or document `download()` method memory risk
+
+**Status:** `AzureBlobClient::download()` uses `$this->filesystem->read()` which loads entire file into memory.
+**Reality check:** No code currently calls `download()` — all paths use `readStream()` or `downloadToFile()`. However, the method exists in the public interface and could be used by future code.
+**Fix:** Add `@deprecated` PHPDoc + `trigger_deprecation()` call, or document the memory limit clearly in the interface. Consider removing from `StorageClientInterface` if unused.
+**Effort:** 15 minutes
+**Source:** Code review `analise.md` #12
+
+### 32. Document `filepath`/`remote_path` column intention
+
+**Status:** In `DocumentTracker::track()`, `filepath` and `remote_path` are always set to the same value.
+**Why it exists:** Intentional preparation for Phase 2 (S3 may use different path prefixes) and future multi-tenant support (per-entity prefixes).
+**Fix:** Add PHPDoc comment in `DocumentTracker` and schema comment in `hook.php` explaining the intentional redundancy.
+**Effort:** 10 minutes
+**Source:** Code review `analise.md` #14
+
+### 33. Storage Firewall Documentation
 
 **Status:** No documentation on securing Azure Blob Storage at the network level.
 **Scope:** This is infrastructure configuration, not plugin code. Document how to:
@@ -245,30 +341,30 @@ cs-fix:
 
 ## P4 — Future / Nice-to-Have
 
-### 23. Dashboard with Statistics
+### 34. Dashboard with Statistics
 
 Plugin settings page showing: total documents in cloud, total size, estimated cost, upload/download counts.
 
-### 24. Email Notification on Repeated Upload Failures
+### 35. Email Notification on Repeated Upload Failures
 
 Integrate with GLPI's `NotificationEvent` to alert admins when uploads fail X times in Y period.
 
-### 25. Azure Storage Tiers (Hot/Cool/Archive) — Documentation Only
+### 36. Azure Storage Tiers (Hot/Cool/Archive) — Documentation Only
 
 **Decision:** Won't implement as plugin feature. Azure Lifecycle Management policies handle this natively at the storage account level (move Hot→Cool→Archive by last modified date) — no code, no maintenance.
 **Action:** Document as infrastructure recommendation in `docs/05-security.md` or README (e.g., "Configure Azure Lifecycle Management policy to move blobs to Cool tier after 30 days").
 **SDK available:** `setBlobTier()` exists if ever justified, but lifecycle policy is the correct approach.
 
-### 26. Multi-tenant Support (Multiple Containers/Prefixes)
+### 37. Multi-tenant Support (Multiple Containers/Prefixes)
 
 Per-entity or per-profile storage containers. GLPI is typically single-tenant — only relevant for MSP deployments.
 
-### 27. Key Vault Integration for Credentials
+### 38. Key Vault Integration for Credentials
 
 Store Azure/S3 credentials in Azure Key Vault or AWS Secrets Manager instead of GLPI database. Highest security tier.
 **Already in:** Security audit P3 backlog.
 
-### 28. Content-Length Header in Proxy Mode
+### 39. Content-Length Header in Proxy Mode
 
 Add `Content-Length` response header in proxy downloads for better browser progress indication.
 **Already in:** Security audit P3 backlog.
@@ -283,3 +379,8 @@ Add `Content-Length` response header in proxy downloads for better browser progr
 | "Optimize proxy mode with readStream + fpassthru" | Already implemented — `StreamedResponse` with `stream_copy_to_stream()` |
 | "Separate DocumentHook into DocumentUploader/DocumentCleaner" | Over-engineering — class is ~300 lines with well-separated static methods. Complexity doesn't justify extraction |
 | "Create a StorageProviderInterface with Strategy pattern" | Already implemented — `StorageClientInterface` (8 methods) + `StorageClientFactory` (singleton with `match` expression). `DocumentHook` only knows the interface, never touches `AzureBlobClient` directly |
+| "`Html::back()` without `return` allows `Config::set()` to execute" | False positive — GLPI 11's `Html::back()` has return type `never` (calls `exit` internally). Code after it is unreachable |
+| "JS path in setup.php may be incorrect" | False positive — GLPI automatically resolves `js/url-rewriter.js` to `plugins/cloudstorage/public/js/url-rewriter.js` |
+| "Add FOREIGN KEY constraint on `documents_id`" | GLPI convention — GLPI core does not use FK constraints by design. Orphan cleanup is handled by CLI Sync command (#11) |
+| "Optimize `testConnection()` — `getBlobs()` slow on large containers" | Marginal — `getBlobs()` with `break` after first result is lazy-evaluated. Overhead is minimal |
+| "Optimize `DocumentTracker` — `new self()` per call" | GLPI pattern — `CommonDBTM` instances are lightweight. Only relevant in 10k+ batch operations where I/O is the real bottleneck |
