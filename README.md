@@ -69,6 +69,7 @@ Full documentation is available in the [docs/](docs/index.md) directory:
 - [FAQ](docs/06-faq.md) — Common questions and troubleshooting
 - [Architecture](docs/01-architecture.md) — System design, hooks, DB schema
 - [Development Guide](docs/07-development-guide.md) — Setup, conventions, testing
+- [Roadmap & TODO](docs/todo.md) — Prioritized backlog (P0–P4)
 
 ## License
 
