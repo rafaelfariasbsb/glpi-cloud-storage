@@ -32,6 +32,7 @@ This plugin redirects storage to cloud: unlimited capacity, high availability, g
 |----------|--------|
 | **Azure Blob Storage** | Available |
 | **AWS S3** | Planned (Phase 2) |
+| **Google Cloud Storage** | Planned (Phase 3) |
 
 ## Requirements
 
